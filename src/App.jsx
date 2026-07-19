@@ -1,32 +1,44 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 
-/* =========================================================================
-   نادي النخيل — النظام المحاسبي المتكامل (نسخة عرض كاملة)
-   كل البيانات تُحفظ داخل الجلسة (React state) وتختفي عند تحديث الصفحة.
-   ========================================================================= */
-
-import { C, T, THEMES, fmt, resolveTheme, applyTheme } from "./constants/theme.js";
+import { C, T, fmt, applyTheme } from "./constants/theme.js";
 import {
   SEED_PRODUCTS, SEED_CUSTOMERS, SEED_SUPPLIERS, SEED_INVOICES, SEED_PURCHASES,
-  SEED_EXPENSES, SEED_EMPLOYEES, SEED_COUPONS, SEED_PROMOS, PERIOD_NAME, PERIOD_ICON,
-  SEED_USERS, CATS, TYPE_ICON, TYPE_NAME, TYPE_DEFAULT_RATE, SEED_TABLES, PERM_LABELS,
-  SEED_ASSETS, ASSET_STATUS, PAGE_LIST,
+  SEED_EXPENSES, SEED_EMPLOYEES, SEED_COUPONS, SEED_PROMOS, SEED_USERS, CATS,
+  SEED_TABLES, SEED_ASSETS,
 } from "./constants/seeds.js";
-import {
-  todayISO, arDate, daysBetween, productBarcodes, matchesBarcode, matchesBarcodePartial,
-  overdueDays, toWa,
-} from "./utils/format.js";
-import { promoActiveNow, promoFor } from "./utils/promos.js";
-import { parseBookingMinutes } from "./utils/bookings.js";
-import { DB, backupCounts, usePersistentState } from "./db/db.js";
+import { todayISO, daysBetween, overdueDays } from "./utils/format.js";
+import { DB, usePersistentState } from "./db/db.js";
 
-import { Badge, Crest, HubIconPaths, HubIcon, PageTop, Card, CardHead, Btn, KCard, Field, inputStyle, Inp, Sel, Modal, Table } from "./components/ui.jsx";
+import { Crest, HubIcon } from "./components/ui.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
-import { MiniBars, Donut, CompareBarChart, TrendChart, RankBarChart } from "./components/charts.jsx";
-import { PDF_HOOK, openPdfDoc, ensureHtml2pdf, PdfPreview } from "./components/pdf.jsx";
-import { genBarcode, BarcodeSVG } from "./components/barcode.jsx";
+import { PDF_HOOK, PdfPreview } from "./components/pdf.jsx";
 
-/* ============================ ROOT APP ============================ */
+import FirstSetup from "./pages/FirstSetup.jsx";
+import Login from "./pages/Login.jsx";
+import Dashboard from "./pages/Dashboard.jsx";
+import POS from "./pages/POS.jsx";
+import Sales from "./pages/Sales.jsx";
+import Products from "./pages/Products.jsx";
+import Purchases from "./pages/Purchases.jsx";
+import Bookings from "./pages/Bookings.jsx";
+import Suppliers from "./pages/Suppliers.jsx";
+import Customers from "./pages/Customers.jsx";
+import RentalDevices from "./pages/RentalDevices.jsx";
+import Assets from "./pages/Assets.jsx";
+import Tournaments from "./pages/Tournaments.jsx";
+import Coupons from "./pages/Coupons.jsx";
+import Treasury from "./pages/Treasury.jsx";
+import Expenses from "./pages/Expenses.jsx";
+import CapitalLedger from "./pages/CapitalLedger.jsx";
+import Salaries from "./pages/Salaries.jsx";
+import Insights from "./pages/Insights.jsx";
+import Reports from "./pages/Reports.jsx";
+import EmployeeActivity from "./pages/EmployeeActivity.jsx";
+import Users from "./pages/Users.jsx";
+import Inventory from "./pages/Inventory.jsx";
+import Settings from "./pages/Settings.jsx";
+import Alerts from "./pages/Alerts.jsx";
+import Promotions from "./pages/Promotions.jsx";
 
 /* ---- شاشة الإقلاع: تحميل قاعدة البيانات قبل عرض النظام ---- */
 export default function NakheelSystemRoot() {
@@ -582,228 +594,3 @@ function NakheelApp() {
     </div>
   );
 }
-
-/* ============================ LOGIN ============================ */
-/* ============================ FIRST SETUP (إنشاء المدير الرئيسي) ============================ */
-function FirstSetup({ settings = {}, onCreate }) {
-  const [f, setF] = useState({ name: "", username: "admin", password: "", confirm: "", clubName: settings.clubName || "نادي النخيل" });
-  const [err, setErr] = useState("");
-  const [showPwd, setShowPwd] = useState(false);
-  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
-
-  const create = () => {
-    if (!f.name.trim()) { setErr("أدخل اسمك الكامل"); return; }
-    if (!f.username.trim()) { setErr("أدخل اسم المستخدم"); return; }
-    if (!f.password || f.password.length < 4) { setErr("أدخل رمز دخول من 4 خانات على الأقل"); return; }
-    if (f.password !== f.confirm) { setErr("رمز الدخول وتأكيده غير متطابقين"); return; }
-    const admin = {
-      id: 1, name: f.name.trim(), username: f.username.trim(), password: f.password, role: "مدير", shift: "—", active: true,
-      perms: { invoices: true, discounts: true, cancel: true, reports: true, customers: true, prices: true, purchases: true, inventory: true, salaries: true },
-      pages: {},
-    };
-    onCreate(admin);
-  };
-
-  return (
-    <div dir="rtl" style={{ fontFamily: "'Tajawal',sans-serif", minHeight: "100vh", background: "radial-gradient(circle at 30% 20%, #1a5c2e 0%, #14431f 45%, #0a2712 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet" />
-      <div style={{ background: "#fff", borderRadius: 22, padding: "2.2rem 2rem", width: 460, maxWidth: "95vw", boxShadow: "0 24px 70px rgba(0,0,0,.4)" }}>
-        <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>{settings.logo ? <img src={settings.logo} alt="" style={{ width: 66, height: 66, borderRadius: 16, objectFit: "cover" }} /> : <Crest size={66} />}</div>
-          <div style={{ fontSize: 20, fontWeight: 900, color: C.grn2 }}>مرحباً بك في {f.clubName}</div>
-          <div style={{ display: "inline-block", background: C.gold + "1c", color: C.gdd, fontSize: 12, fontWeight: 700, borderRadius: 20, padding: ".25rem .9rem", marginTop: 8 }}>⚙ الإعداد الأولي — إنشاء حساب المدير</div>
-          <div style={{ fontSize: 12, color: C.mt, marginTop: 10, lineHeight: 1.8 }}>هذه أول مرة تشغّل فيها النظام (أو بعد تصفيره).<br />أنشئ حساب المدير الرئيسي للبدء.</div>
-        </div>
-
-        <div style={{ textAlign: "right", marginBottom: 12 }}>
-          <label style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>الاسم الكامل *</label>
-          <input value={f.name} autoFocus onChange={e => { set("name", e.target.value); setErr(""); }} placeholder="مثال: أحمد الحسين"
-            style={{ width: "100%", marginTop: 4, fontSize: 13, border: `0.5px solid ${C.bc}`, borderRadius: 10, padding: ".6rem .8rem", background: C.crm, fontFamily: "inherit", outline: "none" }} />
-        </div>
-        <div style={{ textAlign: "right", marginBottom: 12 }}>
-          <label style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>اسم المستخدم (للدخول) *</label>
-          <input value={f.username} onChange={e => { set("username", e.target.value); setErr(""); }} placeholder="admin"
-            onKeyDown={e => e.key === "Enter" && create()}
-            style={{ width: "100%", marginTop: 4, fontSize: 13, border: `0.5px solid ${C.bc}`, borderRadius: 10, padding: ".6rem .8rem", background: C.crm, fontFamily: "inherit", outline: "none", direction: "ltr", textAlign: "left" }} />
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-          <div style={{ textAlign: "right" }}>
-            <label style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>رمز الدخول *</label>
-            <input type={showPwd ? "text" : "password"} autoComplete="new-password" value={f.password} onChange={e => { set("password", e.target.value); setErr(""); }} placeholder="••••••"
-              style={{ width: "100%", marginTop: 4, fontSize: 14, border: `0.5px solid ${C.bc}`, borderRadius: 10, padding: ".6rem .8rem", background: C.crm, fontFamily: "inherit", outline: "none" }} />
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <label style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>تأكيد الرمز *</label>
-            <input type={showPwd ? "text" : "password"} autoComplete="new-password" value={f.confirm} onChange={e => { set("confirm", e.target.value); setErr(""); }} placeholder="••••••" onKeyDown={e => e.key === "Enter" && create()}
-              style={{ width: "100%", marginTop: 4, fontSize: 14, border: `0.5px solid ${C.bc}`, borderRadius: 10, padding: ".6rem .8rem", background: C.crm, fontFamily: "inherit", outline: "none" }} />
-          </div>
-        </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: C.mt, marginBottom: 12, cursor: "pointer" }}><input type="checkbox" checked={showPwd} onChange={e => setShowPwd(e.target.checked)} /> إظهار الرمز أثناء الكتابة</label>
-
-        {err && <div style={{ color: C.red, fontSize: 12, marginBottom: 12, textAlign: "center" }}>{err}</div>}
-
-        <button onClick={create} style={{ width: "100%", padding: ".8rem", borderRadius: 12, background: "linear-gradient(135deg,#c9a84c,#b8923c)", color: "#fff", border: "none", fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✓ إنشاء الحساب والدخول</button>
-
-        <div style={{ fontSize: 10.5, color: C.mt, marginTop: 16, textAlign: "center", lineHeight: 1.7 }}>
-          سيحصل هذا الحساب على كامل صلاحيات الإدارة.<br />
-          يمكنك إضافة بائعين وموظفين لاحقاً من قسم المستخدمين.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Login({ users, onLogin, settings = {} }) {
-  const [selected, setSelected] = useState(null);
-  const [pwd, setPwd] = useState("");
-  const [showPwd, setShowPwd] = useState(false);
-  const [err, setErr] = useState("");
-  const [shake, setShake] = useState(false);
-  const [phase, setPhase] = useState("idle"); // idle | checking | success
-  const activeUsers = users.filter(u => u.active);
-
-  const submit = () => {
-    if (!selected || phase !== "idle") return;
-    if (selected.password) {
-      if (pwd !== selected.password) {
-        setErr("رمز الدخول غير صحيح"); setPwd(""); setShake(true);
-        setTimeout(() => setShake(false), 420);
-        return;
-      }
-    }
-    // لمسة احترافية: نبضة نجاح قصيرة قبل الدخول الفعلي
-    setPhase("checking");
-    setTimeout(() => {
-      setPhase("success");
-      setTimeout(() => onLogin(selected), 480);
-    }, 420);
-  };
-  const roleIcon = (r) => r === "مدير" ? "👑" : "🧑‍💼";
-  const pick = (u) => { setSelected(u); setErr(""); setPwd(""); };
-  const back = () => { setSelected(null); setPwd(""); setErr(""); setPhase("idle"); };
-
-  return (
-    <div dir="rtl" style={{ fontFamily: "'Tajawal',sans-serif", minHeight: "100vh", background: "radial-gradient(circle at 30% 20%, #1a5c2e 0%, #14431f 45%, #0a2712 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, position: "relative", overflow: "hidden" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet" />
-      <style>{`
-        @keyframes nkPopIn{0%{opacity:0;transform:translateY(22px) scale(.96)}100%{opacity:1;transform:none}}
-        @keyframes nkGlowBg{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:.85;transform:scale(1.08)}}
-        @keyframes nkGlowBg2{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:.6;transform:scale(1.12)}}
-        @keyframes nkFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
-        @keyframes nkCardIn{0%{opacity:0;transform:translateY(14px) scale(.94)}100%{opacity:1;transform:none}}
-        @keyframes nkShake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}
-        @keyframes nkShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-        @keyframes nkSpin{to{transform:rotate(360deg)}}
-        @keyframes nkCheckPop{0%{opacity:0;transform:scale(.3) rotate(-20deg)}60%{transform:scale(1.15) rotate(4deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
-        @keyframes nkSlideIn{0%{opacity:0;transform:translateX(14px)}100%{opacity:1;transform:none}}
-        @keyframes nkRing{0%{box-shadow:0 0 0 0 rgba(201,168,76,.55)}100%{box-shadow:0 0 0 10px rgba(201,168,76,0)}}
-        .nk-login-card:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(0,0,0,.1); border-color: rgba(201,168,76,.55) !important; }
-        .nk-login-card:active { transform: translateY(-1px) scale(.98); }
-        .nk-login-card { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
-        .nk-shake { animation: nkShake .42s ease; }
-        .nk-btn-primary { transition: transform .15s ease, box-shadow .15s ease, filter .15s ease; }
-        .nk-btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(201,168,76,.4); filter: brightness(1.04); }
-        .nk-btn-primary:active:not(:disabled) { transform: translateY(0) scale(.98); }
-        .nk-back-btn { transition: color .15s ease, transform .15s ease; }
-        .nk-back-btn:hover { color: #c9a84c !important; transform: translateX(3px); }
-        .nk-eye-btn { transition: color .15s ease, transform .15s ease; }
-        .nk-eye-btn:hover { color: #c9a84c !important; transform: translateY(-50%) scale(1.12); }
-        .nk-pwd-input:focus { border-color: #c9a84c !important; box-shadow: 0 0 0 3px rgba(201,168,76,.15); }
-      `}</style>
-
-      {/* خلفية متوهجة متحركة */}
-      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 78% 82%, rgba(201,168,76,.16) 0%, transparent 42%)", animation: "nkGlowBg 6s ease-in-out infinite" }} />
-      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", background: "radial-gradient(circle at 15% 15%, rgba(255,255,255,.08) 0%, transparent 38%)", animation: "nkGlowBg2 7s ease-in-out infinite 1s" }} />
-      {/* نخيل عائم خفيف في الخلفية للمسة هوية */}
-      <div style={{ position: "fixed", bottom: "6%", left: "6%", fontSize: 90, opacity: .06, animation: "nkFloat 8s ease-in-out infinite", pointerEvents: "none" }}>🌴</div>
-      <div style={{ position: "fixed", top: "10%", right: "8%", fontSize: 60, opacity: .05, animation: "nkFloat 9s ease-in-out infinite 1.5s", pointerEvents: "none" }}>🌴</div>
-
-      <div style={{ background: "#fff", borderRadius: 22, padding: "2.2rem 2rem", width: 440, maxWidth: "95vw", boxShadow: "0 24px 70px rgba(0,0,0,.45)", animation: "nkPopIn .45s cubic-bezier(.2,.8,.2,1)", position: "relative", overflow: "hidden" }}>
-        {/* خط ذهبي علوي متلألئ */}
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg, transparent, #c9a84c, transparent)", backgroundSize: "200% 100%", animation: "nkShimmer 3s linear infinite" }} />
-
-        <div style={{ textAlign: "center" }}>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-            <div style={{ position: "relative" }}>
-              {phase === "success" && <div style={{ position: "absolute", inset: -4, borderRadius: 18, animation: "nkRing 1s ease-out infinite" }} />}
-              {settings.logo ? <img src={settings.logo} alt="" style={{ width: 66, height: 66, borderRadius: 16, objectFit: "cover" }} /> : <Crest size={66} />}
-            </div>
-          </div>
-          <div style={{ fontSize: 21, fontWeight: 900, color: C.grn2 }}>{settings.clubName || "نادي النخيل"}</div>
-          <div style={{ fontSize: 12, color: C.mt, marginBottom: 22, transition: "opacity .2s ease" }}>
-            {phase === "success" ? "تم التحقق بنجاح ✓" : selected ? `مرحباً ${selected.name}` : "اختر المستخدم لتسجيل الدخول"}
-          </div>
-        </div>
-
-        {!selected ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {activeUsers.map((u, i) => (
-              <div key={u.id} onClick={() => pick(u)} className="nk-login-card" style={{ cursor: "pointer", border: `1px solid ${C.bc}`, borderRadius: 14, padding: "1rem .8rem", textAlign: "center", background: C.crm, animation: `nkCardIn .38s cubic-bezier(.2,.8,.2,1) both`, animationDelay: `${i * 60}ms` }}>
-                <div style={{ width: 48, height: 48, borderRadius: "50%", margin: "0 auto 8px", background: u.role === "مدير" ? C.gold + "22" : C.grl + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>{roleIcon(u.role)}</div>
-                <div style={{ fontSize: 13.5, fontWeight: 700 }}>{u.name}</div>
-                <div style={{ fontSize: 11, color: C.mt, marginTop: 2 }}>{u.role}{u.shift !== "—" ? ` · ${u.shift}` : ""}</div>
-              </div>
-            ))}
-            {activeUsers.length === 0 && <div style={{ gridColumn: "1 / -1", textAlign: "center", color: C.mt, fontSize: 12.5, padding: "1.5rem" }}>لا يوجد مستخدمون نشطون</div>}
-          </div>
-        ) : (
-          <div style={{ animation: "nkSlideIn .3s cubic-bezier(.2,.8,.2,1)" }} className={shake ? "nk-shake" : ""}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.crm, borderRadius: 12, padding: ".7rem .85rem", marginBottom: 14 }}>
-              <div style={{ width: 42, height: 42, borderRadius: "50%", background: phase === "success" ? "#1a8c3e22" : selected.role === "مدير" ? C.gold + "22" : C.grl + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21, transition: "background .3s ease" }}>
-                {phase === "success" ? <span style={{ display: "inline-block", animation: "nkCheckPop .4s ease" }}>✅</span> : roleIcon(selected.role)}
-              </div>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 700 }}>{selected.name}</div><div style={{ fontSize: 11, color: C.mt }}>{selected.role}</div></div>
-              {phase === "idle" && <button onClick={back} className="nk-back-btn" style={{ background: "none", border: "none", color: C.mt, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>تغيير</button>}
-            </div>
-
-            {phase !== "success" && <>
-              <label style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>رمز الدخول</label>
-              <div style={{ position: "relative", marginTop: 4, marginBottom: 16 }}>
-                <input className="nk-pwd-input" type={showPwd ? "text" : "password"} autoFocus autoComplete="new-password" disabled={phase === "checking"} value={pwd} onChange={(e) => { setPwd(e.target.value); setErr(""); }} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="••••••••"
-                  style={{ width: "100%", fontSize: 14, letterSpacing: showPwd ? 0 : 2, border: `0.5px solid ${C.bc}`, borderRadius: 10, padding: ".6rem 2.4rem .6rem .8rem", background: C.crm, fontFamily: "inherit", outline: "none", transition: "border-color .15s ease, box-shadow .15s ease", opacity: phase === "checking" ? .6 : 1 }} />
-                <button onClick={() => setShowPwd(s => !s)} tabIndex={-1} title={showPwd ? "إخفاء" : "إظهار"} className="nk-eye-btn" style={{ position: "absolute", top: "50%", right: 8, transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 15, color: C.mt, padding: 4 }}>{showPwd ? "🙈" : "👁"}</button>
-              </div>
-              {err && <div style={{ color: C.red, fontSize: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 5 }}><span>⚠</span>{err}</div>}
-              <button onClick={submit} disabled={phase === "checking"} className="nk-btn-primary" style={{ width: "100%", padding: ".72rem", borderRadius: 12, background: "linear-gradient(135deg,#c9a84c,#b8923c)", color: "#fff", border: "none", fontSize: 14.5, fontWeight: 700, cursor: phase === "checking" ? "default" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                {phase === "checking" ? <><span style={{ width: 15, height: 15, border: "2px solid rgba(255,255,255,.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "nkSpin .6s linear infinite" }} />جارٍ التحقق...</> : "دخول →"}
-              </button>
-            </>}
-          </div>
-        )}
-
-        <div style={{ fontSize: 10.5, color: C.mt, marginTop: 18, textAlign: "center", lineHeight: 1.7 }}>
-          نظام إدارة متكامل — {new Date().getFullYear()}<br />
-          <span style={{ fontSize: 10 }}>أدخل رمز الدخول الخاص بك — يديره المدير من قسم المستخدمين</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-/* ============================ DASHBOARD ============================ */
-import Dashboard from "./pages/Dashboard.jsx";
-import POS from "./pages/POS.jsx";
-import Sales from "./pages/Sales.jsx";
-import Products from "./pages/Products.jsx";
-import Purchases from "./pages/Purchases.jsx";
-import Bookings from "./pages/Bookings.jsx";
-import Suppliers from "./pages/Suppliers.jsx";
-import Customers from "./pages/Customers.jsx";
-import RentalDevices from "./pages/RentalDevices.jsx";
-import Assets from "./pages/Assets.jsx";
-import Tournaments from "./pages/Tournaments.jsx";
-import Coupons from "./pages/Coupons.jsx";
-import Treasury from "./pages/Treasury.jsx";
-import Expenses from "./pages/Expenses.jsx";
-import CapitalLedger from "./pages/CapitalLedger.jsx";
-import Salaries from "./pages/Salaries.jsx";
-
-import Insights from "./pages/Insights.jsx";
-import Reports from "./pages/Reports.jsx";
-import EmployeeActivity from "./pages/EmployeeActivity.jsx";
-import Users from "./pages/Users.jsx";
-import Inventory from "./pages/Inventory.jsx";
-import Settings from "./pages/Settings.jsx";
-import Alerts from "./pages/Alerts.jsx";
-import Promotions from "./pages/Promotions.jsx";
