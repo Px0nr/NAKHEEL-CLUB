@@ -85,7 +85,9 @@ export default function Treasury({ ctx }) {
       closedBy: user.name, closedAt: new Date().toISOString(),
     }, ...cs]);
     DB.flush("closings");
-    showToast(diff === 0 ? "تم الإغلاق — مطابقة تامة ✓" : diff < 0 ? `تم تسجيل عجز ${fmt(Math.abs(diff))} ${cur} على ${assignTo}` : `تم حفظ زيادة ${fmt(diff)} ${cur} في النظام`);
+    // لقطة احتياطية تلقائية عند كل إغلاق يومي — نقطة زمنية طبيعية لنهاية العمل، تحمي من فقدان بيانات اليوم
+    DB.saveAutoBackup();
+    showToast(diff === 0 ? "تم الإغلاق — مطابقة تامة ✓ (وحُفظت لقطة احتياطية تلقائية)" : diff < 0 ? `تم تسجيل عجز ${fmt(Math.abs(diff))} ${cur} على ${assignTo}` : `تم حفظ زيادة ${fmt(diff)} ${cur} في النظام`);
     setActual({ cash: "", card: "", transfer: "" }); setAssignTo(""); setNote("");
   };
 

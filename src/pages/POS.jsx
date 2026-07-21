@@ -12,7 +12,7 @@ const Row = ({ label, val, color }) => <div style={{ display: "flex", justifyCon
 
 /* ============================ POS ============================ */
 export default function POS({ ctx, can }) {
-  const { products, setProducts, invoices, setInvoices, coupons, customers, setCustomers, employees, promotions, user, showToast, settings } = ctx;
+  const { products, setProducts, setInvoices, coupons, customers, setCustomers, employees, promotions, user, showToast, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const [cart, setCart] = useState({});
   const [pay, setPay] = useState("cash");
@@ -87,13 +87,15 @@ export default function POS({ ctx, can }) {
 
   const checkout = () => {
     if (!items.length) return;
-    const num = "INV-" + (1048 + invoices.filter(i => i.id.startsWith("INV-1")).length);
+    const num = "INV-" + ctx.nextCounter("invoice");
     const details = items.map(i => `${i.name} ×${i.qty} ${i.sellUnit === "pack" ? i.unitLabel : ""}`.trim()).join("، ");
     let custName = "زبون نقدي";
+    let custId = null;
 
     if (pay === "defer") {
       if (!deferCustomer) { showToast("اختر زبوناً أو سجّل زبوناً جديداً للبيع الآجل"); return; }
       custName = deferCustomer.name;
+      custId = deferCustomer.id;
       setCustomers(cs => cs.map(c => c.id === deferCustomer.id
         ? { ...c, debt: (c.debt || 0) + total, total: c.total + total, invoices: c.invoices + 1, last: todayISO() }
         : c));
@@ -102,6 +104,7 @@ export default function POS({ ctx, can }) {
       custName = deferEmployee.name;
     } else if (custForPoints) {
       custName = custForPoints.name;
+      custId = custForPoints.id;
     }
 
     // نقاط الولاء: استبدال (إن اختير) ثم اكتساب نقاط جديدة على قيمة البيع النهائية
@@ -122,7 +125,7 @@ export default function POS({ ctx, can }) {
       const p = products.find(x => x.id === it.pid);
       return s + (p?.buy || 0) * it.qty * it.perPieces;
     }, 0);
-    setInvoices(iv => [{ id: num, customer: custName, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), pay: PAY_LABEL[pay], discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}) }, ...iv]);
+    setInvoices(iv => [{ id: num, customer: custName, customerId: custId, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), pay: PAY_LABEL[pay], discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}) }, ...iv]);
     showToast(pay === "defer" ? `فاتورة آجلة #${num} على ${custName} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}` : pay === "employee" ? `فاتورة موظف #${num} على ${custName} — ${fmt(total)} ${cur}${freeValue > 0 ? ` (مزايا مجانية ${fmt(freeValue)} ${cur})` : ""}` : `تم إنشاء الفاتورة #${num} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}`);
     setCart({}); setDiscPct(0); setCoupon(""); setDeferCustomer(null); setDueDate(""); setPointsCustomer(null); setRedeemPoints(false); setDeferEmployee(null);
   };

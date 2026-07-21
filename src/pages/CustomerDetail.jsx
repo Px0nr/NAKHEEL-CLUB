@@ -12,7 +12,8 @@ export default function CustomerDetail({ ctx, customer, onClose }) {
   const [payAmount, setPayAmount] = useState("");
   const [payVia, setPayVia] = useState("كاش");
   const c = customer;
-  const custInvoices = invoices.filter(iv => iv.customer === c.name);
+  // مطابقة بالمعرّف للفواتير الحديثة، وبالاسم للفواتير القديمة التي أُنشئت قبل ربطها بمعرّف الزبون
+  const custInvoices = invoices.filter(iv => iv.customerId != null ? iv.customerId === c.id : iv.customer === c.name);
   const deferredInvoices = custInvoices.filter(iv => iv.pay === "آجل" && iv.status === "معلقة");
 
   /* receive a payment -> issue receipt, reduce debt, settle oldest deferred invoices */

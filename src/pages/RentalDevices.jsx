@@ -5,7 +5,7 @@ import { todayISO, toWaNumber } from "../utils/format.js";
 
 /* ============================ RENTAL DEVICES (تأجير الأجهزة الإلكترونية) ============================ */
 export default function RentalDevices({ ctx }) {
-  const { rentalDevices, setRentalDevices, rentals, setRentals, setInvoices, invoices, user, showToast, settings } = ctx;
+  const { rentalDevices, setRentalDevices, rentals, setRentals, setInvoices, user, showToast, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force(x => x + 1), 30000); return () => clearInterval(t); }, []); // تحديث العدّادات كل 30ث
@@ -48,7 +48,7 @@ export default function RentalDevices({ ctx }) {
     setRentalDevices(ds => ds.map(d => d.id === device.id ? { ...d, status: "rented" } : d));
 
     // إنشاء فاتورة (بلا تكلفة بضاعة — التأجير ليس استهلاكاً للمخزون)
-    const invNum = "INV-RT-" + (invoices.filter(i => i.id.startsWith("INV-RT")).length + 1);
+    const invNum = "INV-RT-" + ctx.nextCounter("rtInvoice");
     setInvoices(iv => [{ id: invNum, customer: rentForm.customer.trim(), date: todayISO(), source: "تأجير", details: `تأجير ${device.name} — ${days} يوم`, pay: rentForm.pay, discount: "—", total, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
 
     showToast(`تم تأجير ${device.name} لـ${rentForm.customer.trim()} — ${fmt(total)} ${cur}`);

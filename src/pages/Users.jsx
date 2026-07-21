@@ -3,6 +3,7 @@ import { C } from "../constants/theme.js";
 import { PAGE_LIST, PERM_LABELS } from "../constants/seeds.js";
 import { PageTop, Btn, Card, CardHead, Badge, Modal, Field, Inp, Sel } from "../components/ui.jsx";
 import { todayISO } from "../utils/format.js";
+import { genSalt, hashPassword } from "../utils/auth.js";
 
 /* ============================ USERS ============================ */
 export default function Users({ ctx }) {
@@ -29,7 +30,7 @@ export default function Users({ ctx }) {
     PAGE_LIST.forEach(p => { if (!visible) pages[p.id] = false; }); // إخفاء الكل = وضع false للجميع
     return { ...u, pages };
   }));
-  const addUser = () => {
+  const addUser = async () => {
     if (!f.name.trim() || !f.username.trim()) { showToast("أدخل الاسم واسم المستخدم"); return; }
     if (!f.password || f.password.length < 4) { showToast("أدخل رمز دخول من 4 خانات على الأقل"); return; }
     const perms = { invoices: true, discounts: false, cancel: false, reports: false, customers: true, prices: false, purchases: false, inventory: false, salaries: false };
@@ -41,7 +42,9 @@ export default function Users({ ctx }) {
       setEmployees(es => [...es, { id: empId, name: f.name.trim(), role: f.role, hired: f.salaryStart, salaryStart: f.salaryStart, salary: parseFloat(f.salary), status: "نشط" }]);
       linkedEmployeeId = empId;
     }
-    setUsers(us => [...us, { id: newId, name: f.name.trim(), username: f.username, password: f.password, role: f.role, shift: f.shift, active: true, perms, pages: {}, linkedEmployeeId }]);
+    const passwordSalt = genSalt();
+    const passwordHash = await hashPassword(f.password, passwordSalt);
+    setUsers(us => [...us, { id: newId, name: f.name.trim(), username: f.username, passwordHash, passwordSalt, role: f.role, shift: f.shift, active: true, perms, pages: {}, linkedEmployeeId }]);
     showToast(linkedEmployeeId ? "تمت إضافة المستخدم وربطه تلقائياً بسجل موظف براتبه" : "تمت إضافة المستخدم");
     setModal(false); setF({ name: "", username: "", password: "", role: "بائع", shift: "صباحي", salary: "", salaryStart: todayISO() });
   };
@@ -80,12 +83,14 @@ export default function Users({ ctx }) {
 
           {/* رمز الدخول */}
           <Card>
-            <CardHead title="🔑 رمز الدخول" sub={current.password ? "رمز محدد لهذا الحساب ✓" : "⚠ لا يوجد رمز — يُنصح بتعيينه فوراً"} />
+            <CardHead title="🔑 رمز الدخول" sub={(current.passwordHash || current.password) ? "رمز محدد لهذا الحساب ✓" : "⚠ لا يوجد رمز — يُنصح بتعيينه فوراً"} />
             <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
               <Inp type="password" autoComplete="new-password" placeholder="رمز جديد (4 خانات فأكثر)" value={newPwd} onChange={e => setNewPwd(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
-              <Btn gold sm onClick={() => {
+              <Btn gold sm onClick={async () => {
                 if (!newPwd || newPwd.length < 4) { showToast("الرمز يجب أن يكون 4 خانات على الأقل"); return; }
-                setUsers(us => us.map(u => u.id === sel ? { ...u, password: newPwd } : u));
+                const passwordSalt = genSalt();
+                const passwordHash = await hashPassword(newPwd, passwordSalt);
+                setUsers(us => us.map(u => u.id === sel ? { ...u, passwordHash, passwordSalt, password: undefined } : u));
                 setNewPwd(""); showToast(`تم تحديث رمز دخول ${current.name}`);
               }}>حفظ الرمز</Btn>
             </div>

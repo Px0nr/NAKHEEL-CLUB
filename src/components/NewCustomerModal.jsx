@@ -5,7 +5,7 @@ import { todayISO, toWaNumber } from "../utils/format.js";
 
 /* ---- Shared new-customer modal (WhatsApp mandatory) ---- */
 export default function NewCustomerModal({ ctx, onClose, onCreated }) {
-  const { customers, setCustomers, setInvoices, invoices, user, showToast } = ctx;
+  const { customers, setCustomers, setInvoices, user, showToast } = ctx;
   const cur = ctx.settings?.currency || "د.ل";
   const [f, setF] = useState({ name: "", phone: "", openingDebt: "", debtDate: todayISO() });
   const save = () => {
@@ -17,8 +17,8 @@ export default function NewCustomerModal({ ctx, onClose, onCreated }) {
     setCustomers(cs => [...cs, c]);
     // دين سابق قبل استخدام النظام: يُسجَّل كفاتورة آجلة حقيقية — يدخل تلقائياً ضمن تنبيهات السداد والتحصيل والخزينة عند السداد
     if (opening > 0) {
-      const invNum = "INV-OB-" + (invoices.filter(i => i.id.startsWith("INV-OB")).length + 1);
-      setInvoices(iv => [{ id: invNum, customer: c.name, date: f.debtDate, source: "رصيد سابق", details: "رصيد افتتاحي — دين سابق قبل استخدام النظام", pay: "آجل", discount: "—", total: opening, cost: 0, status: "معلقة", dueDate: f.debtDate, by: user?.name || "—" }, ...iv]);
+      const invNum = "INV-OB-" + ctx.nextCounter("obInvoice");
+      setInvoices(iv => [{ id: invNum, customer: c.name, customerId: c.id, date: f.debtDate, source: "رصيد سابق", details: "رصيد افتتاحي — دين سابق قبل استخدام النظام", pay: "آجل", discount: "—", total: opening, cost: 0, status: "معلقة", dueDate: f.debtDate, by: user?.name || "—" }, ...iv]);
     }
     showToast(opening > 0 ? `تمت إضافة الزبون برصيد سابق ${fmt(opening)} ${cur}` : "تمت إضافة الزبون");
     onCreated ? onCreated(c) : onClose();

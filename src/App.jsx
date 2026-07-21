@@ -7,6 +7,7 @@ import {
   SEED_TABLES, SEED_ASSETS,
 } from "./constants/seeds.js";
 import { todayISO, daysBetween, overdueDays } from "./utils/format.js";
+import { nextCounter } from "./utils/counters.js";
 import { DB, usePersistentState } from "./db/db.js";
 
 import { Crest, HubIcon } from "./components/ui.jsx";
@@ -130,6 +131,9 @@ function NakheelApp() {
   const [tables, setTables] = usePersistentState("tables", SEED_TABLES, true);
   const [cats, setCats] = usePersistentState("cats", { games: "ألعاب فيديو", cafe: "كافيه" }, true);
   const [completedBookings, setCompletedBookings] = usePersistentState("completed_bookings", []);
+  // عدّادات تسلسلية دائمة لأرقام الفواتير/التوريدات (لا تتكرر أبداً حتى بعد حذف سجلات) —
+  // القيم الابتدائية تطابق الترقيم القديم المعتمد على .length لضمان استمرارية الأرقام
+  const [counters, setCounters] = usePersistentState("counters", { invoice: 1047, po: 234, bkInvoice: 0, autoInvoice: 8, rtInvoice: 0, obInvoice: 0 }, true);
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
@@ -256,7 +260,7 @@ function NakheelApp() {
     return <FirstSetup settings={settings} onCreate={(admin) => { setUsers([admin]); setUser(admin); }} />;
   }
 
-  if (!user) return <Login users={users} onLogin={setUser} settings={settings} />;
+  if (!user) return <Login users={users} onLogin={setUser} settings={settings} setUsers={setUsers} />;
 
   // apply active theme to shared palette before rendering
   applyTheme(settings);
@@ -282,6 +286,7 @@ function NakheelApp() {
     bookings, setBookings, completedBookings, setCompletedBookings, tables, setTables,
     cats, setCats,
     settings, setSettings,
+    nextCounter: (key) => nextCounter(counters, setCounters, key),
     totals, showToast, overdueAlerts, notifications,
     cmdOpen, setCmdOpen, setSearchIntent,
   };

@@ -292,10 +292,10 @@ export default function Settings({ ctx }) {
               <b>1.</b> أنشئ حساباً ومشروعاً مجانياً على <b>supabase.com</b><br />
               <b>2.</b> افتح <b>SQL Editor</b> والصق محتوى ملف <code style={{ background: C.crm, padding: "1px 6px", borderRadius: 5 }}>supabase-schema.sql</code> المرفق ثم نفّذه<br />
               <b>3.</b> من <b>Settings → API</b> انسخ <b>Project URL</b> و <b>anon key</b><br />
-              <b>4.</b> افتح ملف النظام وضعهما في أعلى الملف:
-              <pre style={{ background: "#14431f", color: "#f0d080", borderRadius: 9, padding: ".7rem .9rem", fontSize: 11, direction: "ltr", textAlign: "left", overflowX: "auto", marginTop: 6 }}>{`const SUPABASE_URL = "https://xxxx.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOi...";`}</pre>
-              أعد تشغيل النظام — ستتحول الحالة إلى ☁️ سحابية تلقائياً، وكل جهاز يفتح النظام يرى نفس البيانات.
+              <b>4.</b> انسخ ملف <code style={{ background: C.crm, padding: "1px 6px", borderRadius: 5 }}>.env.example</code> باسم <code style={{ background: C.crm, padding: "1px 6px", borderRadius: 5 }}>.env.local</code> وضع القيمتين فيه:
+              <pre style={{ background: "#14431f", color: "#f0d080", borderRadius: 9, padding: ".7rem .9rem", fontSize: 11, direction: "ltr", textAlign: "left", overflowX: "auto", marginTop: 6 }}>{`VITE_SUPABASE_URL=https://xxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}</pre>
+              أعد تشغيل خادم التطوير (npm run dev) — ستتحول الحالة إلى ☁️ سحابية تلقائياً، وكل جهاز يفتح النظام يرى نفس البيانات. لا تُرفع <code style={{ background: C.crm, padding: "1px 6px", borderRadius: 5 }}>.env.local</code> إلى أي مستودع عام — يحتوي مفاتيح مشروعك.
             </div>
           </Card>
           <div style={{ gridColumn: "1 / -1" }}><BackupManager ctx={ctx} /></div>

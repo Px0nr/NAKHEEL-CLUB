@@ -1,21 +1,26 @@
 import { useState } from "react";
 import { C } from "../constants/theme.js";
 import { Crest } from "../components/ui.jsx";
+import { genSalt, hashPassword } from "../utils/auth.js";
 
 /* ============================ FIRST SETUP (إنشاء المدير الرئيسي) ============================ */
 export default function FirstSetup({ settings = {}, onCreate }) {
   const [f, setF] = useState({ name: "", username: "admin", password: "", confirm: "", clubName: settings.clubName || "نادي النخيل" });
   const [err, setErr] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  const [busy, setBusy] = useState(false);
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
 
-  const create = () => {
+  const create = async () => {
     if (!f.name.trim()) { setErr("أدخل اسمك الكامل"); return; }
     if (!f.username.trim()) { setErr("أدخل اسم المستخدم"); return; }
     if (!f.password || f.password.length < 4) { setErr("أدخل رمز دخول من 4 خانات على الأقل"); return; }
     if (f.password !== f.confirm) { setErr("رمز الدخول وتأكيده غير متطابقين"); return; }
+    setBusy(true);
+    const passwordSalt = genSalt();
+    const passwordHash = await hashPassword(f.password, passwordSalt);
     const admin = {
-      id: 1, name: f.name.trim(), username: f.username.trim(), password: f.password, role: "مدير", shift: "—", active: true,
+      id: 1, name: f.name.trim(), username: f.username.trim(), passwordSalt, passwordHash, role: "مدير", shift: "—", active: true,
       perms: { invoices: true, discounts: true, cancel: true, reports: true, customers: true, prices: true, purchases: true, inventory: true, salaries: true },
       pages: {},
     };
@@ -60,7 +65,7 @@ export default function FirstSetup({ settings = {}, onCreate }) {
 
         {err && <div style={{ color: C.red, fontSize: 12, marginBottom: 12, textAlign: "center" }}>{err}</div>}
 
-        <button onClick={create} style={{ width: "100%", padding: ".8rem", borderRadius: 12, background: "linear-gradient(135deg,#c9a84c,#b8923c)", color: "#fff", border: "none", fontSize: 14.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✓ إنشاء الحساب والدخول</button>
+        <button onClick={create} disabled={busy} style={{ width: "100%", padding: ".8rem", borderRadius: 12, background: "linear-gradient(135deg,#c9a84c,#b8923c)", color: "#fff", border: "none", fontSize: 14.5, fontWeight: 700, cursor: busy ? "default" : "pointer", fontFamily: "inherit", opacity: busy ? .7 : 1 }}>{busy ? "⏳ جارٍ الإنشاء..." : "✓ إنشاء الحساب والدخول"}</button>
 
         <div style={{ fontSize: 10.5, color: C.mt, marginTop: 16, textAlign: "center", lineHeight: 1.7 }}>
           سيحصل هذا الحساب على كامل صلاحيات الإدارة.<br />

@@ -5,10 +5,11 @@ import { useState } from "react";
    لتفعيل الحفظ السحابي والمزامنة بين الأجهزة:
    1) أنشئ مشروعاً مجانياً على supabase.com
    2) نفّذ ملف supabase-schema.sql في SQL Editor
-   3) ضع الرابط والمفتاح أدناه (من Settings → API)
+   3) انسخ ملف .env.example إلى .env.local وضع فيه القيم (من Settings → API)
+   4) أعد تشغيل خادم التطوير (npm run dev) بعد إنشاء/تعديل .env.local
    ========================================================================= */
-const SUPABASE_URL = "";      // مثال: https://xxxx.supabase.co
-const SUPABASE_ANON_KEY = ""; // مفتاح anon public
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
 export const DB = {
   mode: "memory",   // supabase | local | memory

@@ -66,7 +66,7 @@ export default function Purchases({ ctx }) {
     const valid = lines.filter(l => l.prodId && l.qty > 0);
     if (!supplier) { showToast("اختر المورد"); return; }
     if (!valid.length) { showToast("أضف منتجاً واحداً على الأقل"); return; }
-    const num = "PO-" + (235 + purchases.filter(p => p.id.startsWith("PO-")).length);
+    const num = "PO-" + ctx.nextCounter("po");
     const itemsStr = valid.map(l => {
       const p = prodOf(l.prodId);
       const unitLbl = l.qtyUnit === "pack" && p?.packSize > 1 ? p.unit : "قطعة";

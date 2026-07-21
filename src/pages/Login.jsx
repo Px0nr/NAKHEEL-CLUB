@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { C } from "../constants/theme.js";
 import { Crest } from "../components/ui.jsx";
+import { genSalt, hashPassword, verifyPassword } from "../utils/auth.js";
 
 /* ============================ LOGIN ============================ */
-export default function Login({ users, onLogin, settings = {} }) {
+export default function Login({ users, onLogin, settings = {}, setUsers }) {
   const [selected, setSelected] = useState(null);
   const [pwd, setPwd] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -12,13 +13,26 @@ export default function Login({ users, onLogin, settings = {} }) {
   const [phase, setPhase] = useState("idle"); // idle | checking | success
   const activeUsers = users.filter(u => u.active);
 
-  const submit = () => {
+  const submit = async () => {
     if (!selected || phase !== "idle") return;
-    if (selected.password) {
+    if (selected.passwordHash) {
+      const ok = await verifyPassword(pwd, selected.passwordSalt, selected.passwordHash);
+      if (!ok) {
+        setErr("رمز الدخول غير صحيح"); setPwd(""); setShake(true);
+        setTimeout(() => setShake(false), 420);
+        return;
+      }
+    } else if (selected.password) {
+      // حساب قديم برمز نصي غير مشفَّر — تحقّق ثم رقِّه فوراً لرمز مشفَّر
       if (pwd !== selected.password) {
         setErr("رمز الدخول غير صحيح"); setPwd(""); setShake(true);
         setTimeout(() => setShake(false), 420);
         return;
+      }
+      if (setUsers) {
+        const passwordSalt = genSalt();
+        const passwordHash = await hashPassword(pwd, passwordSalt);
+        setUsers(us => us.map(u => u.id === selected.id ? { ...u, passwordHash, passwordSalt, password: undefined } : u));
       }
     }
     // لمسة احترافية: نبضة نجاح قصيرة قبل الدخول الفعلي

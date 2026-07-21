@@ -33,16 +33,27 @@ export default function Customers({ ctx }) {
   const debtorsCount = customers.filter(c => (c.debt || 0) > 0).length;
 
   // تصنيف تلقائي: يُحسب من سجل مشتريات الزبون الفعلي — بمرور واحد على الفواتير (لا فلترة لكل زبون على حدة)
-  const statsByName = useMemo(() => {
-    const map = {};
+  // الفواتير الحديثة مرتبطة بمعرّف الزبون (customerId) فلا تتأثر بتعديل الاسم لاحقاً؛
+  // الفواتير القديمة (قبل هذه الميزة) لا تحمل معرّفاً فتُطابَق بالاسم كما كان سابقاً
+  const statsByCustomer = useMemo(() => {
+    const byId = {}, byName = {};
     invoices.forEach(i => {
       if (i.status !== "مدفوعة") return;
-      if (!map[i.customer]) map[i.customer] = { count: 0, total: 0 };
-      map[i.customer].count++; map[i.customer].total += i.total;
+      if (i.customerId != null) {
+        if (!byId[i.customerId]) byId[i.customerId] = { count: 0, total: 0 };
+        byId[i.customerId].count++; byId[i.customerId].total += i.total;
+      } else {
+        if (!byName[i.customer]) byName[i.customer] = { count: 0, total: 0 };
+        byName[i.customer].count++; byName[i.customer].total += i.total;
+      }
     });
-    return map;
+    return { byId, byName };
   }, [invoices]);
-  const custStats = (name) => statsByName[name] || { count: 0, total: 0 };
+  const custStats = (c) => {
+    const a = statsByCustomer.byId[c.id] || { count: 0, total: 0 };
+    const b = statsByCustomer.byName[c.name] || { count: 0, total: 0 };
+    return { count: a.count + b.count, total: a.total + b.total };
+  };
   const computeTier = (stats) => {
     if (stats.total >= 3000 || stats.count >= 15) return "VIP";
     if (stats.count === 0) return "جديد";
@@ -69,7 +80,7 @@ export default function Customers({ ctx }) {
         } />
         <Table cols={[{ h: "الاسم", w: "20%" }, { h: "واتساب", w: "17%" }, { h: "الفواتير", w: "11%" }, { h: "إجمالي الشراء", w: "16%" }, { h: "الرصيد الآجل", w: "15%" }, { h: "التصنيف", w: "11%" }, { h: "عرض", w: "10%" }]}
           rows={pageRows.map(c => {
-            const stats = custStats(c.name);
+            const stats = custStats(c);
             const tier = computeTier(stats);
             return [
               <span style={{ fontWeight: 600 }}>{c.name}</span>,
