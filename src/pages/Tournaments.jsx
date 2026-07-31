@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { C } from "../constants/theme.js";
 import { PageTop, Btn, Card, CardHead, Badge, Modal, Field, Inp, Sel } from "../components/ui.jsx";
-import { openPdfDoc } from "../components/pdf.jsx";
+import { openPdfDoc } from "../components/pdfHook.js";
 import { todayISO, arDate } from "../utils/format.js";
 import { buildBracket, roundLabels, setMatchWinner } from "../utils/bracket.js";
 

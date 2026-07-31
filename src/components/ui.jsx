@@ -1,4 +1,6 @@
+import { useState, useEffect, useRef } from "react";
 import { C, T } from "../constants/theme.js";
+import { motionEnabled } from "../utils/motionPrefs.js";
 
 /* ---------- small UI atoms ---------- */
 export const Badge = ({ tone = "g", children, style }) => {
@@ -56,14 +58,14 @@ export const CardHead = ({ title, sub, right }) => (
     {right}
   </div>
 );
-export const Btn = ({ children, onClick, gold, danger, sm, style }) => (
+export const Btn = ({ children, onClick, gold, danger, sm, style, ...rest }) => (
   <button onClick={onClick} style={{
     display: "inline-flex", alignItems: "center", gap: 5, padding: sm ? ".2rem .58rem" : ".36rem .82rem",
     borderRadius: 8, fontSize: sm ? 11.5 : 12.5, cursor: "pointer", fontFamily: "inherit", fontWeight: 500,
     border: `1px solid ${danger ? "rgba(192,57,43,.3)" : C.bc}`,
     background: gold ? "linear-gradient(135deg,#c9a84c,#b8923c)" : C.cd,
     color: gold ? "#fff" : danger ? C.red : C.ink, ...style,
-  }}>{children}</button>
+  }} {...rest}>{children}</button>
 );
 export const KCard = ({ label, value, sub, bar = C.gold, delta }) => (
   <div className="nk-kcard" style={{ background: C.cd, border: `0.5px solid ${C.bc}`, borderRadius: 13, padding: ".85rem 1rem", position: "relative", overflow: "hidden", boxShadow: "0 1px 2px rgba(20,67,31,.04)" }}>
@@ -83,12 +85,41 @@ export const inputStyle = { fontSize: 12.5, border: `0.5px solid ${C.bc}`, borde
 export const Inp = (p) => <input {...p} style={{ ...inputStyle, ...(p.style || {}) }} />;
 export const Sel = (p) => <select {...p} style={{ ...inputStyle, ...(p.style || {}) }}>{p.children}</select>;
 
+/* مدة حركة الخروج — يجب أن تطابق .nk-modal-out في App.jsx.
+   لا تُقاس عبر حدث animationend لأن الحركة قد تكون معطّلة (بمفتاح الإعدادات أو
+   بتفضيل تقليل الحركة) فلا يُطلَق الحدث أبداً وتبقى النافذة مفتوحة للأبد. */
+const MODAL_EXIT_MS = 170;
+
 export function Modal({ title, onClose, children, width = 540 }) {
+  const [closing, setClosing] = useState(false);
+  const timerRef = useRef(null);
+
+  // الإغلاق يؤجَّل ريثما تنتهي حركة الخروج، ثم يُبلَّغ الأب فيُزيل النافذة.
+  // عند تعطيل الحركة يُغلق فوراً بلا تأخير مصطنع.
+  const close = () => {
+    if (closing) return;
+    if (!motionEnabled()) { onClose(); return; }
+    setClosing(true);
+    timerRef.current = setTimeout(onClose, MODAL_EXIT_MS);
+  };
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  // Escape للإغلاق — سلوك متوقَّع في أي نافذة، ولم يكن مدعوماً
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
   return (
-    <div onClick={(e) => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(10,30,15,.5)", backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
-      <div className="nk-modal-in" style={{ background: C.cd, borderRadius: 16, padding: "1.4rem 1.5rem", width, maxWidth: "96vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 60px rgba(0,0,0,.35)" }}>
+    <div onClick={(e) => e.target === e.currentTarget && close()}
+      className={closing ? "nk-backdrop-out" : undefined}
+      style={{ position: "fixed", inset: 0, background: "rgba(10,30,15,.5)", backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
+      <div className={closing ? "nk-modal-out" : "nk-modal-in"} role="dialog" aria-modal="true"
+        style={{ background: C.cd, borderRadius: 16, padding: "1.4rem 1.5rem", width, maxWidth: "96vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 60px rgba(0,0,0,.35)" }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: "1.1rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {title}<button onClick={onClose} style={{ cursor: "pointer", color: C.mt, fontSize: 18, background: "none", border: "none", fontFamily: "inherit" }}>✕</button>
+          {title}<button onClick={close} aria-label="إغلاق" style={{ cursor: "pointer", color: C.mt, fontSize: 18, background: "none", border: "none", fontFamily: "inherit" }}>✕</button>
         </div>
         {children}
       </div>

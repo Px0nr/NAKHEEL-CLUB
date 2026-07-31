@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { Modal, Field, Inp, Btn, Badge, Table } from "../components/ui.jsx";
-import { openPdfDoc } from "../components/pdf.jsx";
+import { openPdfDoc } from "../components/pdfHook.js";
 import { todayISO, arDate } from "../utils/format.js";
 
 /* ---- Customer detail: statement, receipt, WhatsApp reports ---- */
 export default function CustomerDetail({ ctx, customer, onClose }) {
-  const { invoices, setInvoices, customers, setCustomers, showToast, settings } = ctx;
+  const { invoices, setInvoices, setCustomers, showToast, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const [payModal, setPayModal] = useState(false);
   const [payAmount, setPayAmount] = useState("");
@@ -43,7 +43,7 @@ export default function CustomerDetail({ ctx, customer, onClose }) {
     const w = window.open("", "_blank", `width=${isThermal ? 340 : 800},height=600`);
     const newDebt = Math.max(0, (c.debt || 0) - amt);
     w.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>وصل استلام</title>
-    <style>@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;font-family:${isThermal ? "monospace" : "'Tajawal',sans-serif"}}
+    <style>*{box-sizing:border-box;margin:0;padding:0;font-family:${isThermal ? "monospace" : "'Tajawal',sans-serif"}}
     body{padding:${isThermal ? "10px" : "2cm"};direction:rtl;color:#1a1a18;${isThermal ? "width:80mm;" : ""}}
     .ttl{text-align:center;font-size:${isThermal ? "14px" : "18px"};font-weight:700;color:#1a5c2e}.sub{text-align:center;font-size:10px;color:#7a7870;margin-bottom:8px}
     .box{border:1px dashed #c9a84c;border-radius:8px;padding:${isThermal ? "8px" : "16px"};margin-top:10px}
@@ -60,7 +60,7 @@ export default function CustomerDetail({ ctx, customer, onClose }) {
       <div class="r"><span>الرصيد المتبقي:</span><span>${fmt(newDebt)} ${cur}</span></div>
     </div>
     <div class="ft">${settings?.invoiceFooter || "شكراً لكم — نادي النخيل"}</div>
-    <script>window.onload=function(){window.print();}<\/script></body></html>`);
+    <script>window.onload=function(){window.print();}</script></body></html>`);
     w.document.close();
   };
 

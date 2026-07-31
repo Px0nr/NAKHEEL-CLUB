@@ -5,7 +5,7 @@ import { todayISO, arDate } from "../utils/format.js";
 
 /* ============================ SALARIES ============================ */
 export default function Salaries({ ctx }) {
-  const { employees, setEmployees, expenses, setExpenses, leaves, setLeaves, deductions, setDeductions, invoices, setInvoices, showToast } = ctx;
+  const { employees, setEmployees, expenses, setExpenses, leaves, setLeaves, deductions, setDeductions, invoices, setInvoices, showToast, confirm } = ctx;
   const cur = ctx.settings?.currency || "د.ل";
   const [modal, setModal] = useState(false);
   const [detail, setDetail] = useState(null); // employee id being viewed
@@ -32,12 +32,12 @@ export default function Salaries({ ctx }) {
   const remainOf = (emp) => emp.salary - takenOf(emp.id) - leaveDeductOf(emp.id) - deductionAmountOf(emp.id) - purchasesAmountOf(emp.id);
 
   // تصفية راتب الموظف (نهاية الشهر): صرف المتبقي كمصروف وتصفير السلف والعطلات والخصومات ومشتريات نقطة البيع
-  const settle = (emp) => {
+  const settle = async (emp) => {
     const remain = remainOf(emp);
     const leaveDed = leaveDeductOf(emp.id);
     const penaltyDed = deductionAmountOf(emp.id);
     const purchDed = purchasesAmountOf(emp.id);
-    if (!window.confirm(`تصفية راتب ${emp.name}؟\nالراتب: ${fmt(emp.salary)} ${cur}\nالسلف المسحوبة: ${fmt(takenOf(emp.id))} ${cur}\nخصم العطلات: ${fmt(leaveDed)} ${cur}\nخصومات وجزاءات: ${fmt(penaltyDed)} ${cur}\nمشتريات نقطة البيع: ${fmt(purchDed)} ${cur}\nالمتبقي للصرف: ${fmt(remain)} ${cur}\n\nسيُسجّل المتبقي كمصروف مرتب وتبدأ دورة جديدة.`)) return;
+    if (!(await confirm(`تصفية راتب ${emp.name}؟\nالراتب: ${fmt(emp.salary)} ${cur}\nالسلف المسحوبة: ${fmt(takenOf(emp.id))} ${cur}\nخصم العطلات: ${fmt(leaveDed)} ${cur}\nخصومات وجزاءات: ${fmt(penaltyDed)} ${cur}\nمشتريات نقطة البيع: ${fmt(purchDed)} ${cur}\nالمتبقي للصرف: ${fmt(remain)} ${cur}\n\nسيُسجّل المتبقي كمصروف مرتب وتبدأ دورة جديدة.`))) return;
     // سجّل صرف باقي الراتب كمصروف
     if (remain > 0) {
       setExpenses(ex => [{ id: Math.max(0, ...ex.map(x => x.id)) + 1, date: todayISO(), cat: "مرتبات", desc: `صرف باقي راتب ${emp.name}`, amount: remain, pay: "نقداً", by: "المدير", empId: null, empName: null }, ...ex]);

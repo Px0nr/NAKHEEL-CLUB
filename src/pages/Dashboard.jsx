@@ -2,42 +2,54 @@ import { useMemo } from "react";
 import { C, T, fmt } from "../constants/theme.js";
 import { PageTop, Badge, Btn, KCard, Card, CardHead, Table } from "../components/ui.jsx";
 import { MiniBars, Donut } from "../components/charts.jsx";
+import { categoryTotals, toSegments, pctDelta } from "../utils/analytics.js";
+import { todayISO, daysBetween, arDate } from "../utils/format.js";
+
+const EXPIRY_WARNING_DAYS = 14;
 
 /* ============================ DASHBOARD ============================ */
 export default function Dashboard({ ctx, go }) {
-  const { totals, invoices, products, overdueAlerts, completedBookings, cats, settings } = ctx;
+  const { totals, invoices, products, completedBookings, cats, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const low = products.filter(p => p.stock !== null && p.min && p.stock < p.min);
+  // منتجات تنتهي صلاحيتها قريباً (خلال 14 يوماً) أو انتهت فعلاً بالفعل — لا تظهر إن نفد المخزون أصلاً (لا قيمة عملية)
+  const expiring = useMemo(() => {
+    const today = todayISO();
+    return products
+      .filter(p => p.hasExp && p.exp && p.stock > 0)
+      .map(p => ({ ...p, daysLeft: daysBetween(today, p.exp) }))
+      .filter(p => p.daysLeft <= EXPIRY_WARNING_DAYS)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [products]);
 
-  // آخر 7 أيام — إيراد فعلي من الفواتير المدفوعة
+  // آخر 7 أيام — إيراد فعلي من الفواتير المدفوعة. التواريخ تُبنى بتوقيت UTC لتطابق todayISO()
+  // المستخدَمة عند إنشاء كل فاتورة (بناء التاريخ محلياً ثم تحويله لسلسلة UTC يزيح اليوم في أي منطقة زمنية غير +00:00)
   const last7 = useMemo(() => {
-    const days = [], labels = [];
+    const days = [], prevWeekDays = [], labels = [];
     const dayName = ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+    const now = new Date();
+    const revOn = (iso) => invoices.filter(v => v.date === iso && v.status === "مدفوعة").reduce((s, v) => s + v.total, 0);
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(); d.setDate(d.getDate() - i);
-      const iso = d.toISOString().split("T")[0];
-      const rev = invoices.filter(v => v.date === iso && v.status === "مدفوعة").reduce((s, v) => s + v.total, 0);
-      days.push(rev); labels.push(i === 0 ? "اليوم" : dayName[d.getDay()]);
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
+      const dPrev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i - 7));
+      days.push(revOn(d.toISOString().split("T")[0]));
+      prevWeekDays.push(revOn(dPrev.toISOString().split("T")[0]));
+      labels.push(i === 0 ? "اليوم" : dayName[d.getUTCDay()]);
     }
-    return { days, labels, max: Math.max(1000, ...days) };
+    return { days, prevWeekDays, labels, max: Math.max(1000, ...days, ...prevWeekDays) };
   }, [invoices]);
 
   const todayISOv = new Date().toISOString().split("T")[0];
   const todayRev = invoices.filter(v => v.date === todayISOv && v.status === "مدفوعة").reduce((s, v) => s + v.total, 0);
   const todayCount = invoices.filter(v => v.date === todayISOv).length;
+  // مقارنة إيراد اليوم بالأمس — last7.days[5] هو أمس دائماً (المصفوفة تنتهي باليوم عند الفهرس 6)
+  const yesterdayRev = last7.days[5] ?? 0;
+  const todayDelta = pctDelta(todayRev, yesterdayRev);
 
-  // توزيع المبيعات حسب القسم (من مصدر الفاتورة والتفاصيل)
-  const dist = useMemo(() => {
-    let games = 0, cafe = 0, other = 0;
-    invoices.filter(v => v.status === "مدفوعة").forEach(v => {
-      if (v.source === "حجز") games += v.total;
-      else if (v.details && (v.details.includes("قهوة") || v.details.includes("عصير") || v.details.includes("Red") || v.details.includes("ساندويش"))) cafe += v.total;
-      else if (v.details && (v.details.includes("PS5") || v.details.includes("Xbox") || v.details.includes("كنترول"))) games += v.total;
-      else other += v.total;
-    });
-    const tot = games + cafe + other || 1;
-    return { games, cafe, other, gPct: Math.round(games / tot * 100), cPct: Math.round(cafe / tot * 100) };
-  }, [invoices]);
+  // توزيع المبيعات حسب القسم — عبر الطبقة المركزية: يعتمد أقسام الأصناف الفعلية (items[].cat)
+  // مع تراجع لمصدر الفاتورة للبيانات القديمة، بدل المطابقة النصية الهشّة السابقة
+  const distSegments = useMemo(() => toSegments(categoryTotals(invoices.filter(v => v.status === "مدفوعة")), cats, settings?.dark), [invoices, cats, settings?.dark]);
+  const distTotal = distSegments.reduce((s, seg) => s + seg.value, 0);
 
   // ألوان اللهجة (tone) لبطاقات المهام — نفس القاموس المستخدم في جرس التنبيهات، مركزي هنا لتفادي التكرار
   const TASK_TONE = {
@@ -81,7 +93,14 @@ export default function Dashboard({ ctx, go }) {
       <div style={{ background: `linear-gradient(120deg, ${C.grn} 0%, ${C.grn2} 100%)`, borderRadius: 14, padding: "1rem 1.2rem", marginBottom: "1.1rem", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 11.5, color: C.gld, opacity: .85 }}>إيرادات اليوم</div>
-          <div style={{ fontSize: T.font.numLg, fontWeight: 900, color: "#fff" }}>{fmt(todayRev)} <span style={{ fontSize: T.font.sm, fontWeight: 600, color: C.gld }}>{cur}</span></div>
+          <div style={{ fontSize: T.font.numLg, fontWeight: 900, color: "#fff", display: "flex", alignItems: "baseline", gap: 8 }}>
+            {fmt(todayRev)} <span style={{ fontSize: T.font.sm, fontWeight: 600, color: C.gld }}>{cur}</span>
+            {yesterdayRev > 0 && (
+              <span title="مقارنة بالأمس" style={{ fontSize: 12, fontWeight: 700, color: todayDelta >= 0 ? "#8ee6a8" : "#ff9b9b", background: "rgba(255,255,255,.12)", borderRadius: 8, padding: "1px 8px" }}>
+                {todayDelta >= 0 ? "▲" : "▼"} {Math.abs(todayDelta)}%
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ display: "flex", gap: 22 }}>
           <div style={{ textAlign: "center" }}><div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{todayCount}</div><div style={{ fontSize: 10.5, color: C.gld, opacity: .85 }}>فواتير اليوم</div></div>
@@ -99,20 +118,23 @@ export default function Dashboard({ ctx, go }) {
 
       <div style={{ display: "grid", gridTemplateColumns: ctx.scr?.isTab ? "1fr" : "3fr 2fr", gap: 11, marginBottom: "1.1rem" }}>
         <Card className="nk-card-hover">
-          <CardHead title="الإيراد اليومي — آخر 7 أيام" sub={cur} />
-          <MiniBars data={last7.days} max={last7.max} color={C.grl} />
+          <CardHead title="الإيراد اليومي — آخر 7 أيام" sub={`${cur} — الخط المتقطع: نفس اليوم الأسبوع الماضي`} />
+          <MiniBars data={last7.days} prevData={last7.prevWeekDays} max={last7.max} color={C.grl} labels={last7.labels} cur={cur} />
           <div style={{ display: "flex", justifyContent: "space-around", fontSize: 9.5, color: C.mt, marginTop: 4 }}>{last7.labels.map((m, i) => <span key={i}>{m}</span>)}</div>
         </Card>
         <Card className="nk-card-hover">
-          <CardHead title="توزيع المبيعات" sub="حسب النشاط" />
-          {dist.games + dist.cafe + dist.other === 0 ? (
+          <CardHead title="توزيع المبيعات" sub="حسب القسم/النشاط" />
+          {distTotal === 0 ? (
             <div style={{ textAlign: "center", color: C.mt, fontSize: 12, padding: "1.5rem 0" }}>لا مبيعات بعد لعرض التوزيع</div>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
-              <Donut segments={[{ v: dist.gPct, c: C.grl }, { v: Math.max(0, 100 - dist.gPct), c: C.gold }]} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, flexWrap: "wrap" }}>
+              <Donut segments={distSegments} cur={cur} />
               <div style={{ fontSize: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: C.grl }} />ألعاب {dist.gPct}%</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: C.gold }} />كافيه/أخرى {100 - dist.gPct}%</div>
+                {distSegments.map(s => (
+                  <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 6 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />{s.label} {s.pct}%
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -137,6 +159,17 @@ export default function Dashboard({ ctx, go }) {
             </div>;
           })}
         </Card>
+        {expiring.length > 0 && (
+          <Card className="nk-card-hover">
+            <CardHead title="⏳ صلاحية على وشك الانتهاء" sub={`${expiring.length} منتج خلال ${EXPIRY_WARNING_DAYS} يوماً`} right={<Btn sm onClick={() => go("products")}>إدارة المنتجات</Btn>} />
+            {expiring.slice(0, 6).map(p => (
+              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: ".4rem 0", borderBottom: `0.5px solid ${C.bc}` }}>
+                <div style={{ fontSize: 12 }}>{p.name}</div>
+                <Badge tone={p.daysLeft < 0 ? "r" : p.daysLeft <= 3 ? "r" : "a"}>{p.daysLeft < 0 ? `منتهية منذ ${Math.abs(p.daysLeft)}ي` : p.daysLeft === 0 ? "تنتهي اليوم" : `${p.daysLeft} يوم — ${arDate(p.exp)}`}</Badge>
+              </div>
+            ))}
+          </Card>
+        )}
       </div>
     </>
   );

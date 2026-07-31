@@ -1,32 +1,24 @@
 import { useState, useEffect, useRef } from "react";
 import { C, fmt } from "../constants/theme.js";
-import { CATS } from "../constants/seeds.js";
 import { PageTop, Btn, KCard, Card, CardHead, Sel, inputStyle, Table, Badge, Modal, Field, Inp } from "../components/ui.jsx";
 import { genBarcode, BarcodeSVG } from "../components/barcode.jsx";
+import WasteModal from "../components/WasteModal.jsx";
+import LabelPrint from "../components/LabelPrint.jsx";
 import { todayISO, arDate, productBarcodes, matchesBarcodePartial } from "../utils/format.js";
 import { DB } from "../db/db.js";
 
 /* ============================ PRODUCTS ============================ */
 export default function Products({ ctx, can }) {
-  const { products, setProducts, waste, setWaste, user, showToast, settings, cats, setCats } = ctx;
+  const { products, setProducts, user, showToast, settings, cats, setCats } = ctx;
   const cur = settings?.currency || "د.ل";
   const [modal, setModal] = useState(false);
   const [editingId, setEditingId] = useState(null); // null = add mode
   const [filter, setFilter] = useState("");
   const [q, setQ] = useState(() => (ctx.searchIntent && ctx.searchIntent.type === "product") ? ctx.searchIntent.query : "");
+  const [page, setPage] = useState(1);
   useEffect(() => { if (ctx.searchIntent && ctx.searchIntent.type === "product") ctx.setSearchIntent(null); }, []);
   const [wasteItem, setWasteItem] = useState(null); // منتج قيد تسجيل الإتلاف
-  const [wasteForm, setWasteForm] = useState({ qty: 1, reason: "سكب / انسكاب", note: "", date: todayISO() });
-  const WASTE_REASONS = ["سكب / انسكاب", "تسريب عبوة", "كسر", "انتهاء الصلاحية", "تلف بالتخزين", "أخرى"];
-  const applyWaste = () => {
-    if (!wasteItem) return;
-    const qty = Math.min(wasteItem.stock, Math.max(1, parseInt(wasteForm.qty) || 1));
-    const cost = Math.round((wasteItem.buy || 0) * qty * 100) / 100;
-    setProducts(ps => ps.map(p => p.id === wasteItem.id ? { ...p, stock: Math.max(0, p.stock - qty) } : p));
-    setWaste(w => [{ id: "WS-" + Date.now(), date: wasteForm.date, pid: wasteItem.id, name: wasteItem.name, cat: wasteItem.cat, qty, reason: wasteForm.reason, note: wasteForm.note.trim(), cost, by: user?.name || "—" }, ...w]);
-    showToast(`تم تسجيل إتلاف ${qty} ${wasteItem.unit} من «${wasteItem.name}» — خسارة ${fmt(cost)} ${cur}`);
-    setWasteItem(null); setWasteForm({ qty: 1, reason: "سكب / انسكاب", note: "", date: todayISO() });
-  };
+  const [labelProduct, setLabelProduct] = useState(null); // منتج قيد طباعة ملصقاته
   const empty = { bc: "", extraBc: "", name: "", cat: "", newCat: "", unit: "علبة", packSize: "", min: "", hasExp: "no", supplier: "", status: "active", img: null, sell: "", sellPack: "" };
   const [form, setForm] = useState(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -37,6 +29,10 @@ export default function Products({ ctx, can }) {
   const shown = products.filter(p =>
     (!filter || p.cat === filter) && (p.name.includes(q) || matchesBarcodePartial(p, q))
   );
+  const PAGE_SIZE = 50;
+  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const pageRows = shown.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
   const lowCount = products.filter(p => p.stock !== null && p.min && p.stock < p.min).length;
   const stockValue = products.reduce((s, p) => s + (p.buy || 0) * (p.stock || 0), 0);
 
@@ -58,7 +54,6 @@ export default function Products({ ctx, can }) {
     // create key and register
     const key = "cat_" + Date.now().toString().slice(-6);
     setCats(cs => ({ ...cs, [key]: name }));
-    CATS[key] = name; // immediate availability
     return key;
   };
 
@@ -107,7 +102,6 @@ export default function Products({ ctx, can }) {
     setForm(empty); setModal(false); setEditingId(null);
   };
 
-  const STATUS = { active: ["نشط", "g"], limited: ["محدود", "a"], inactive: ["غير نشط", "r"] };
   const imgRef = useRef(null);
   const onImg = (e) => {
     const file = e.target.files?.[0];
@@ -129,15 +123,15 @@ export default function Products({ ctx, can }) {
       <Card>
         <CardHead title="قائمة المنتجات" sub="اضغط «تعديل» لتغيير البيانات أو الأسعار أو الصورة" right={
           <div style={{ display: "flex", gap: 7 }}>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="بحث بالاسم أو الباركود..." style={{ ...inputStyle, width: 170 }} />
-            <Sel value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 130 }}><option value="">كل الأقسام</option>{Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Sel>
+            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="بحث بالاسم أو الباركود..." style={{ ...inputStyle, width: 170 }} />
+            <Sel value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }} style={{ width: 130 }}><option value="">كل الأقسام</option>{Object.entries(cats).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Sel>
           </div>
         } />
         <Table cols={[{ h: "الباركود", w: "11%" }, { h: "الاسم", w: "19%" }, { h: "القسم", w: "10%" }, { h: "العبوة", w: "10%" }, { h: "بيع/قطعة", w: "8%" }, { h: "بيع/عبوة", w: "8%" }, { h: "شراء/قطعة", w: "8%" }, { h: "المخزون", w: "8%" }, { h: "الصلاحية", w: "8%" }, { h: "إجراءات", w: "10%" }]}
-          rows={shown.map(p => [
+          rows={pageRows.map(p => [
             <span><span style={{ fontFamily: "monospace", fontSize: 11, background: C.crm, padding: "2px 6px", borderRadius: 5 }}>{p.bc}</span>{p.barcodes && p.barcodes.length > 0 && <span title={p.barcodes.join(", ")} style={{ fontSize: 9.5, background: C.gold + "22", color: C.gdd, padding: "2px 5px", borderRadius: 5, marginRight: 4, fontWeight: 700 }}>+{p.barcodes.length}</span>}</span>,
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>{p.img ? <img src={p.img} alt="" style={{ width: 26, height: 26, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} /> : <span style={{ width: 26, height: 26, borderRadius: 6, background: C.crm, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>{p.cat === "games" ? "🎮" : "☕"}</span>}<span style={{ fontWeight: 600 }}>{p.name}</span></span>,
-            <Badge tone={p.cat === "games" ? "g" : "a"}>{CATS[p.cat] || p.cat}</Badge>,
+            <Badge tone={p.cat === "games" ? "g" : "a"}>{cats[p.cat] || p.cat}</Badge>,
             <span>{p.unit}{p.packSize > 1 ? <span style={{ fontSize: 10, color: C.mt }}> (×{p.packSize})</span> : ""}</span>,
             p.sell ? <span style={{ fontWeight: 600, color: C.grn2 }}>{p.sell} {cur}</span> : <span style={{ color: C.mt, fontSize: 11 }}>لم يُسعّر</span>,
             p.packSize > 1 ? (p.sellPack ? <span style={{ fontWeight: 600, color: C.gdd }}>{p.sellPack} {cur}</span> : <span style={{ color: C.mt, fontSize: 11 }}>{p.sell ? fmt(p.sell * p.packSize) + " " + cur : "—"}</span>) : "—",
@@ -145,29 +139,25 @@ export default function Products({ ctx, can }) {
             p.stock !== null ? <span style={{ color: p.min && p.stock < p.min ? C.red : C.k2, fontWeight: p.min && p.stock < p.min ? 600 : 400 }}>{p.stock}</span> : "خدمة",
             <span style={{ fontSize: 11 }}>{p.hasExp ? arDate(p.exp) : "—"}</span>,
             can("inventory") ? (
-              <div style={{ display: "flex", gap: 4 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                 <Btn sm onClick={() => openEdit(p)}>✎ تعديل</Btn>
-                {p.stock !== null && <Btn sm danger onClick={() => { setWasteItem(p); setWasteForm({ qty: 1, reason: "سكب / انسكاب", note: "", date: todayISO() }); }}>🗑 إتلاف</Btn>}
+                <Btn sm title="طباعة ملصق باركود" onClick={() => setLabelProduct(p)}>🖨</Btn>
+                {p.stock !== null && <Btn sm danger onClick={() => setWasteItem(p)}>🗑 إتلاف</Btn>}
               </div>
             ) : "—",
           ])} />
+        {shown.length === 0 && <div style={{ textAlign: "center", color: C.mt, fontSize: 12.5, padding: "1.5rem" }}>لا منتجات مطابقة</div>}
+        {totalPages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${C.bc}` }}>
+            <Btn sm onClick={() => setPage(p => Math.max(1, p - 1))} style={{ opacity: pageSafe === 1 ? .4 : 1 }}>‹ السابق</Btn>
+            <span style={{ fontSize: 12, color: C.mt }}>صفحة {pageSafe} من {totalPages}</span>
+            <Btn sm onClick={() => setPage(p => Math.min(totalPages, p + 1))} style={{ opacity: pageSafe === totalPages ? .4 : 1 }}>التالي ›</Btn>
+          </div>
+        )}
       </Card>
 
-      {wasteItem && (
-        <Modal title={`تسجيل إتلاف — ${wasteItem.name}`} onClose={() => setWasteItem(null)} width={440}>
-          <div style={{ fontSize: 12, color: C.mt, marginBottom: 12, background: C.crm, borderRadius: 8, padding: ".55rem .8rem" }}>المتوفر حالياً: <b>{wasteItem.stock} {wasteItem.unit}</b> — سعر الشراء: <b>{fmt(wasteItem.buy || 0)} {cur}</b> / {wasteItem.unit}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Field label={"الكمية التالفة (" + wasteItem.unit + ")"}><Inp type="number" min="1" max={wasteItem.stock} value={wasteForm.qty} onChange={e => setWasteForm({ ...wasteForm, qty: e.target.value })} /></Field>
-            <Field label="التاريخ"><Inp type="date" value={wasteForm.date} onChange={e => setWasteForm({ ...wasteForm, date: e.target.value })} /></Field>
-            <Field label="السبب" full><Sel value={wasteForm.reason} onChange={e => setWasteForm({ ...wasteForm, reason: e.target.value })}>{WASTE_REASONS.map(r => <option key={r}>{r}</option>)}</Sel></Field>
-            <Field label="ملاحظة (اختياري)" full><Inp value={wasteForm.note} onChange={e => setWasteForm({ ...wasteForm, note: e.target.value })} placeholder="مثال: سقط كوب أثناء التقديم" /></Field>
-          </div>
-          <div style={{ background: "#fdeaea", border: "0.5px solid rgba(192,57,43,.25)", borderRadius: 9, padding: ".6rem .85rem", margin: ".4rem 0 1rem", fontSize: 12.5, display: "flex", justifyContent: "space-between" }}>
-            <span>الخسارة المقدّرة</span><b style={{ color: C.red }}>{fmt(Math.round((wasteItem.buy || 0) * (Math.max(1, parseInt(wasteForm.qty) || 1)) * 100) / 100)} {cur}</b>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}><Btn danger onClick={applyWaste} style={{ flex: 1, justifyContent: "center" }}>🗑 تأكيد الإتلاف وخصمه من المخزون</Btn><Btn onClick={() => setWasteItem(null)}>إلغاء</Btn></div>
-        </Modal>
-      )}
+      {wasteItem && <WasteModal product={wasteItem} onClose={() => setWasteItem(null)} ctx={ctx} cur={cur} />}
+      {labelProduct && <LabelPrint product={labelProduct} cur={cur} onClose={() => setLabelProduct(null)} />}
 
       {modal && (
         <Modal title={isEdit ? `تعديل منتج — ${form.name || ""}` : "إضافة منتج جديد"} onClose={() => { setModal(false); setEditingId(null); }}>

@@ -6,7 +6,7 @@ import { todayISO, arDate } from "../utils/format.js";
 
 /* ============================ BOOKINGS ============================ */
 export default function Bookings({ ctx }) {
-  const { bookings, setBookings, completedBookings, setCompletedBookings, setInvoices, tables, setTables, cancellations, setCancellations, user, showToast, settings } = ctx;
+  const { bookings, setBookings, completedBookings, setCompletedBookings, setInvoices, tables, setTables, cancellations, setCancellations, user, showToast, confirm, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const [modal, setModal] = useState(false);
   const [manageModal, setManageModal] = useState(false);
@@ -30,9 +30,9 @@ export default function Bookings({ ctx }) {
     setCancelModal(false); setCancelForm({ customer: "", resType: "billiard", reason: "عدم حضور", note: "", date: todayISO() });
   };
   // إلغاء حجز نشط حالياً بدون فوترة (مثلاً بدأ بالخطأ) — يحرّر الطاولة ويُسجَّل في سجل الإلغاءات
-  const cancelActive = (id) => {
+  const cancelActive = async (id) => {
     const b = bookings[id]; if (!b) return;
-    if (!window.confirm(`إلغاء حجز ${b.tableName} دون إصدار فاتورة؟`)) return;
+    if (!(await confirm(`إلغاء حجز ${b.tableName} دون إصدار فاتورة؟`))) return;
     logCancellation({ date: todayISO(), customer: b.customer, resType: b.type, resName: b.tableName, reason: "خطأ في التسجيل", note: "أُلغي أثناء الحجز النشط" });
     setBookings(bk => { const n = { ...bk }; delete n[id]; return n; });
     showToast("أُلغي الحجز وحُرّرت الطاولة");
@@ -62,7 +62,7 @@ export default function Bookings({ ctx }) {
     if (!isOpen) {
       const invNum = "INV-BK-" + ctx.nextCounter("bkInvoice");
       const durStr = mins === "15" ? "ربع ساعة" : mins === "30" ? "نصف ساعة" : "ساعة";
-      setInvoices(iv => [{ id: invNum, customer: cust || "زبون", date: todayISO(), source: "حجز", details: `${TYPE_NAME[tbl.type]} — ${tbl.name} — ${durStr}`, resType: tbl.type, resName: tbl.name, pay, discount: "—", total: price, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+      setInvoices(iv => [{ id: invNum, customer: cust || "زبون", date: todayISO(), source: "حجز", details: `${TYPE_NAME[tbl.type]} — ${tbl.name} — ${durStr}`, resType: tbl.type, resName: tbl.name, items: [{ cat: "__booking", name: `${TYPE_NAME[tbl.type]} — ${tbl.name}`, qty: 1, lineTotal: price }], pay, discount: "—", total: price, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
       showToast(`تم تأكيد الحجز — ${durStr} بـ ${fmt(price)} ${cur} (${pay}) · فاتورة #${invNum}`);
     } else {
       showToast(`بدأ حجز مفتوح على ${tbl.name} — العدّاد يعمل`);
@@ -86,7 +86,7 @@ export default function Bookings({ ctx }) {
     const durStr = durMin >= 60 ? `${Math.floor(durMin / 60)}س ${durMin % 60}د` : `${durMin}د`;
     const invNum = "INV-AUTO-" + ctx.nextCounter("autoInvoice");
     setCompletedBookings(cb => [{ type: b.type, tableName: b.tableName, customer: b.customer, dur: durStr, rate: b.rate, total, inv: invNum }, ...cb]);
-    setInvoices(iv => [{ id: invNum, customer: b.customer, date: todayISO(), source: "حجز", details: `${TYPE_NAME[b.type]} — ${b.tableName} — ${durStr}`, resType: b.type, resName: b.tableName, pay: b.pay || "كاش", discount: "—", total: Math.round(total * 10) / 10, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+    setInvoices(iv => [{ id: invNum, customer: b.customer, date: todayISO(), source: "حجز", details: `${TYPE_NAME[b.type]} — ${b.tableName} — ${durStr}`, resType: b.type, resName: b.tableName, items: [{ cat: "__booking", name: `${TYPE_NAME[b.type]} — ${b.tableName}`, qty: 1, lineTotal: Math.round(total * 10) / 10 }], pay: b.pay || "كاش", discount: "—", total: Math.round(total * 10) / 10, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
     setBookings(bk => { const n = { ...bk }; delete n[id]; return n; });
     showToast(`فاتورة تلقائية #${invNum} — ${fmt(Math.round(total * 10) / 10)} ${cur}`);
   };

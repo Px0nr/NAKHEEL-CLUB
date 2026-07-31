@@ -5,7 +5,7 @@ import SupplierDetail from "./SupplierDetail.jsx";
 
 /* ============================ SUPPLIERS ============================ */
 export default function Suppliers({ ctx }) {
-  const { suppliers, setSuppliers, purchases, setPurchases, showToast, settings } = ctx;
+  const { suppliers, setSuppliers, showToast, settings } = ctx;
   const [modal, setModal] = useState(false);
   const [filter, setFilter] = useState("all"); // all | due
   const [q, setQ] = useState("");

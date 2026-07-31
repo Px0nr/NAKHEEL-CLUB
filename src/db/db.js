@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 /* =========================================================================
    طبقة قاعدة البيانات — Supabase (سحابية) ← التخزين المحلي ← الذاكرة
@@ -18,6 +18,18 @@ export const DB = {
   client: null,
   timers: {},
   error: null,
+  subscribers: {}, // key -> Set(callback) — لإشعار مكوّنات usePersistentState بتغييرات الأجهزة الأخرى فوراً
+
+  onRemoteChange(key, cb) {
+    (this.subscribers[key] || (this.subscribers[key] = new Set())).add(cb);
+    return () => this.subscribers[key]?.delete(cb);
+  },
+
+  // يُستدعى عند وصول تغيير من جهاز آخر عبر Supabase Realtime — يحدّث الذاكرة المحلية ويُشعر أي مكوّن مُشترك بهذا المفتاح
+  _applyRemote(k, v) {
+    this.cache[k] = v;
+    (this.subscribers[k] || []).forEach(cb => { try { cb(v); } catch { /* ignore */ } });
+  },
 
   async init() {
     if (this.ready) return;
@@ -29,6 +41,15 @@ export const DB = {
         const { data, error } = await this.client.from("nk_store").select("k,v");
         if (error) throw error;
         (data || []).forEach(r => { this.cache[r.k] = r.v; });
+        // مزامنة فورية: أي تعديل يحفظه جهاز آخر يصل هنا لحظياً بدل انتظار إعادة تحميل الصفحة —
+        // هذا يمنع أكثر سيناريو شائع لمسح التعديلات: جهاز ثانٍ مفتوح وخامل ثم يحفظ نسخته القديمة فوق تعديل جهاز أول
+        this.client
+          .channel("nk_store_changes")
+          .on("postgres_changes", { event: "*", schema: "public", table: "nk_store" }, (payload) => {
+            const row = payload.new;
+            if (row && row.k) this._applyRemote(row.k, row.v);
+          })
+          .subscribe();
         this.mode = "supabase"; this.ready = true; return;
       } catch (e) {
         this.error = "تعذّر الاتصال بـ Supabase — تم التحويل للتخزين المحلي";
@@ -41,7 +62,7 @@ export const DB = {
       const raw = localStorage.getItem("nakheel_db");
       if (raw) this.cache = JSON.parse(raw);
       this.mode = "local"; this.ready = true; return;
-    } catch (e) { /* بيئة تمنع localStorage */ }
+    } catch { /* بيئة تمنع localStorage */ }
     // 3) الذاكرة المؤقتة (تُفقد عند التحديث)
     this.mode = "memory"; this.ready = true;
   },
@@ -50,7 +71,7 @@ export const DB = {
   clearStaleSession() {
     if (this.cache.session_user !== undefined) {
       delete this.cache.session_user;
-      if (this.mode === "local") { try { localStorage.setItem("nakheel_db", JSON.stringify(this.cache)); } catch (e) {} }
+      if (this.mode === "local") { try { localStorage.setItem("nakheel_db", JSON.stringify(this.cache)); } catch { /* localStorage may be unavailable — ignore */ } }
       if (this.mode === "supabase" && this.client) { this.client.from("nk_store").delete().eq("k", "session_user").then(() => {}, () => {}); }
     }
   },
@@ -184,5 +205,7 @@ export function usePersistentState(key, seed, alwaysSeed = false) {
     DB.set(key, next);
     return next;
   });
+  // استقبال تعديلات جهاز آخر فوراً (Supabase Realtime) — تحديث الحالة مباشرة بلا إعادة كتابة إلى القاعدة (تجنّباً لحلقة لا نهائية)
+  useEffect(() => DB.onRemoteChange(key, setVal), [key]);
   return [val, set];
 }

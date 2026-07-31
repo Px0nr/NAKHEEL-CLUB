@@ -61,6 +61,8 @@ export default function EmployeeActivity({ ctx }) {
     "تعديل سعر": { icon: "💲", tone: "a" },
     "تعديل إعدادات": { icon: "⚙", tone: "b" },
     "إلغاء حجز": { icon: "✕", tone: "r" },
+    "حذف فاتورة": { icon: "🗑", tone: "r" },
+    "تعديل مخزون يدوي": { icon: "📦", tone: "a" },
   };
 
   const activities = useMemo(() => {

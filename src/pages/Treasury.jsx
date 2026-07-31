@@ -13,8 +13,6 @@ export default function Treasury({ ctx }) {
   const [assignTo, setAssignTo] = useState("");
   const [note, setNote] = useState("");
 
-  const payDay = (i) => i.paidAt || i.date;
-  const payMethod = (i) => i.paidVia || i.pay;
   const normPay = (p) => p === "نقداً" ? "كاش" : p;
   const today = todayISO();
   // يوم العمل المُغلَق: افتراضياً اليوم، لكن قبل الساعة 6 صباحاً يُفترض أن الإغلاق لليوم السابق (نوبات تعمل بعد منتصف الليل)
@@ -210,7 +208,7 @@ export default function Treasury({ ctx }) {
             rows={closings.map(c => [arDate(c.date), fmt(c.expected.total) + " " + cur, fmt(c.actual.total) + " " + cur,
               <span style={{ fontWeight: 700, color: c.diff === 0 ? "#1a8c3e" : c.diff < 0 ? "#c0392b" : "#2a78d6" }}>{c.diff > 0 ? "+" : ""}{fmt(c.diff)}</span>,
               <Badge tone={ST[c.status].t}>{ST[c.status].l}</Badge>, c.assignedTo || "—", c.closedBy,
-              <button onClick={() => deleteClosing(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 13 }}>🗑</button>])} />
+              <button onClick={() => deleteClosing(c.id)} aria-label="حذف سجل الإغلاق" style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 13 }}>🗑</button>])} />
         )}
       </Card>
     </>

@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { PageTop, Card, CardHead, KCard, Table, Badge, Btn, Modal, Sel, inputStyle } from "../components/ui.jsx";
-import { openPdfDoc } from "../components/pdf.jsx";
-import { arDate } from "../utils/format.js";
+import { openPdfDoc } from "../components/pdfHook.js";
+import { arDate, todayISO } from "../utils/format.js";
 import { DB } from "../db/db.js";
 
 /* ============================ SALES ============================ */
 export default function Sales({ ctx, can }) {
-  const { invoices, setInvoices } = ctx;
+  const { invoices, setInvoices, confirm } = ctx;
   const cur = ctx.settings?.currency || "د.ل";
   const [q, setQ] = useState(() => (ctx.searchIntent && ctx.searchIntent.type === "invoice") ? ctx.searchIntent.query : "");
   const [filter, setFilter] = useState("all");
@@ -31,11 +31,16 @@ export default function Sales({ ctx, can }) {
   const pageRows = shown.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
   const monthSales = invoices.filter(i => i.status === "مدفوعة").reduce((s, i) => s + i.total, 0);
   const cancel = (id) => { if (!can("cancel")) return; setInvoices(iv => iv.map(i => i.id === id ? { ...i, status: "ملغاة" } : i)); setDetail(null); };
-  const deleteInvoice = (id) => {
+  const deleteInvoice = async (id) => {
     if (!can("cancel")) return;
-    if (!window.confirm("حذف هذه الفاتورة نهائياً من السجل؟\n\nهذا مختلف عن «الإلغاء» — الحذف يزيل الفاتورة تماماً ولا يمكن التراجع عنه، ولن تظهر بعدها في أي تقرير. استخدمه فقط لتصحيح خطأ إدخال حقيقي (كفاتورة مكرَّرة بالخطأ).")) return;
+    if (!(await confirm("حذف هذه الفاتورة نهائياً من السجل؟\n\nهذا مختلف عن «الإلغاء» — الحذف يزيل الفاتورة تماماً ولا يمكن التراجع عنه، ولن تظهر بعدها في أي تقرير. استخدمه فقط لتصحيح خطأ إدخال حقيقي (كفاتورة مكرَّرة بالخطأ).", { danger: true }))) return;
+    const inv = invoices.find(i => i.id === id);
     setInvoices(iv => iv.filter(i => i.id !== id));
     DB.flush("invoices");
+    if (inv) {
+      ctx.setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: ctx.user?.name || "—", type: "حذف فاتورة", detail: `#${inv.id} — ${inv.customer} — ${fmt(inv.total)} ${cur}` }, ...al]);
+      DB.flush("auditLog");
+    }
     ctx.showToast("تم حذف الفاتورة نهائياً");
     setDetail(null);
   };

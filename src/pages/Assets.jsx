@@ -2,13 +2,14 @@ import { useState } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { ASSET_STATUS } from "../constants/seeds.js";
 import { PageTop, Btn, KCard, Card, CardHead, Sel, inputStyle, Badge, Modal, Field, Inp } from "../components/ui.jsx";
+import QuickAddSupplierModal from "../components/QuickAddSupplierModal.jsx";
 import { todayISO, arDate, daysBetween } from "../utils/format.js";
 
 const actBtn = (color) => ({ background: color + "18", border: "none", borderRadius: 6, color, fontSize: 12, fontWeight: 700, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" });
 
 /* ============================ ASSETS (موارد النادي) ============================ */
 export default function Assets({ ctx }) {
-  const { assets, setAssets, suppliers, setSuppliers, user, showToast } = ctx;
+  const { assets, setAssets, suppliers, user, showToast } = ctx;
   const cur = ctx.settings?.currency || "د.ل";
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
@@ -19,7 +20,6 @@ export default function Assets({ ctx }) {
 
   const empty = { name: "", cat: "أجهزة ألعاب", qty: 1, addedAt: todayISO(), supplier: "", cost: "" };
   const [f, setF] = useState(empty);
-  const [newSup, setNewSup] = useState({ name: "", phone: "", spec: "" });
   const [act, setAct] = useState({ date: todayISO(), note: "", cost: "" });
 
   const CATS_A = ["أجهزة ألعاب", "معدات رياضية", "أثاث", "إلكترونيات", "أخرى"];
@@ -174,7 +174,7 @@ export default function Assets({ ctx }) {
             <Field label="المورّد (اختياري)" full>
               <div style={{ display: "flex", gap: 6 }}>
                 <Sel value={f.supplier} onChange={e => setF({ ...f, supplier: e.target.value })} style={{ flex: 1 }}><option value="">— بدون —</option>{suppliers.map(s => <option key={s.id}>{s.name}</option>)}</Sel>
-                <Btn sm gold onClick={() => { setNewSup({ name: "", phone: "", spec: "" }); setSupModal(true); }} style={{ whiteSpace: "nowrap" }}>+ مورّد</Btn>
+                <Btn sm gold onClick={() => setSupModal(true)} style={{ whiteSpace: "nowrap" }}>+ مورّد</Btn>
               </div>
             </Field>
           </div>
@@ -183,23 +183,7 @@ export default function Assets({ ctx }) {
       )}
 
       {/* نافذة إضافة مورّد سريع */}
-      {supModal && (
-        <Modal title="إضافة مورّد جديد" onClose={() => setSupModal(false)} width={420}>
-          <Field label="اسم المورّد *"><Inp value={newSup.name} onChange={e => setNewSup({ ...newSup, name: e.target.value })} /></Field>
-          <Field label="الهاتف / الواتساب"><Inp value={newSup.phone} onChange={e => setNewSup({ ...newSup, phone: e.target.value })} placeholder="0913-000-000" /></Field>
-          <Field label="التخصص"><Inp value={newSup.spec} onChange={e => setNewSup({ ...newSup, spec: e.target.value })} placeholder="أجهزة ألعاب" /></Field>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn gold style={{ flex: 1, justifyContent: "center" }} onClick={() => {
-              if (!newSup.name.trim()) { showToast("أدخل اسم المورّد"); return; }
-              let d = (newSup.phone || "").replace(/\D/g, ""); if (d.startsWith("0")) d = "218" + d.slice(1);
-              const s = { id: Math.max(0, ...suppliers.map(x => x.id)) + 1, name: newSup.name.trim(), phone: newSup.phone, wa: d, spec: newSup.spec || "عام", total: 0, due: 0, status: "نشط" };
-              setSuppliers(list => [...list, s]); setF(ff => ({ ...ff, supplier: s.name }));
-              showToast("تمت إضافة المورّد واختياره"); setSupModal(false);
-            }}>✓ حفظ واختيار</Btn>
-            <Btn onClick={() => setSupModal(false)}>إلغاء</Btn>
-          </div>
-        </Modal>
-      )}
+      {supModal && <QuickAddSupplierModal onClose={() => setSupModal(false)} ctx={ctx} onCreated={(s) => setF(ff => ({ ...ff, supplier: s.name }))} />}
     </>
   );
 }

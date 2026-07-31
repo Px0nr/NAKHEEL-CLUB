@@ -18,8 +18,3 @@ export const toWa = (phone) => {
   if (d.startsWith("0")) d = "218" + d.slice(1);
   return d;
 };
-export function toWaNumber(phone) {
-  let d = (phone || "").replace(/\D/g, "");
-  if (d.startsWith("0")) d = "218" + d.slice(1);
-  return d;
-}

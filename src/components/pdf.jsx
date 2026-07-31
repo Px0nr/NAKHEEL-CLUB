@@ -1,22 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import html2pdf from "html2pdf.js";
 import { Crest } from "./ui.jsx";
-
-export const PDF_HOOK = { show: null };
-// تُستدعى من أي مكوّن — تعرض المستند داخل التطبيق (بدون نوافذ منبثقة)
-export function openPdfDoc(settings, cfg) {
-  if (PDF_HOOK.show) PDF_HOOK.show({ settings: settings || {}, cfg });
-}
-
-// تحميل مكتبة تحويل HTML إلى PDF عند الحاجة (تدعم العربية لأنها تلتقط العرض الفعلي)
-export function ensureHtml2pdf() {
-  return new Promise((resolve, reject) => {
-    if (window.html2pdf) return resolve();
-    const sc = document.createElement("script");
-    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    sc.onload = resolve; sc.onerror = () => reject(new Error("cdn"));
-    document.head.appendChild(sc);
-  });
-}
 
 export function PdfPreview({ doc, onClose }) {
   const s = doc.settings || {};
@@ -36,8 +20,7 @@ export function PdfPreview({ doc, onClose }) {
       // ننتظر لحظة حتى يكتمل عرض المستند والخط
       await new Promise(r => setTimeout(r, 350));
       try {
-        await ensureHtml2pdf();
-        const b = await window.html2pdf().set({
+        const b = await html2pdf().set({
           margin: [8, 8, 10, 8],
           image: { type: "jpeg", quality: 0.96 },
           html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
@@ -46,7 +29,7 @@ export function PdfPreview({ doc, onClose }) {
         if (cancelled) return;
         const url = URL.createObjectURL(b);
         setBlob(b); setBlobUrl(url); setState("ready");
-      } catch (e) {
+      } catch {
         if (!cancelled) setState("failed");
       }
     };
@@ -65,7 +48,7 @@ export function PdfPreview({ doc, onClose }) {
       } else {
         setNote("المشاركة المباشرة غير مدعومة في هذا المتصفح — استخدم زر التنزيل ثم شارك الملف من جهازك.");
       }
-    } catch (e) { /* المستخدم أغلق قائمة المشاركة */ }
+    } catch { /* المستخدم أغلق قائمة المشاركة */ }
   };
 
   const printDoc = () => {
@@ -79,7 +62,7 @@ export function PdfPreview({ doc, onClose }) {
   const btn = (bg, color) => ({ background: bg, color, border: "none", borderRadius: 9, fontSize: 13, fontWeight: 700, padding: "8px 15px", cursor: "pointer", fontFamily: "inherit", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 });
   const hint = note
     || (state === "preparing" ? "⏳ جارٍ تجهيز ملف الـPDF تلقائياً..."
-      : state === "failed" ? "تعذّر تجهيز الملف (تحقق من الإنترنت) — استخدم زر «طباعة / حفظ» واختر PDF."
+      : state === "failed" ? "تعذّر تجهيز الملف — استخدم زر «طباعة / حفظ» واختر PDF."
         : "✅ الملف جاهز — نزّله أو شاركه عبر واتساب 📎 مباشرة");
 
   const D = { grn: "#1a5c2e", gold: "#c9a84c", gld: "#f0d080", mt: "#7a7870", crm: "#faf8f2" };

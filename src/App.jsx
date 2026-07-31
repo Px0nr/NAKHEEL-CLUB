@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, lazy, Suspense } from "react";
 
 import { C, T, fmt, applyTheme } from "./constants/theme.js";
 import {
@@ -8,38 +8,45 @@ import {
 } from "./constants/seeds.js";
 import { todayISO, daysBetween, overdueDays } from "./utils/format.js";
 import { nextCounter } from "./utils/counters.js";
+import { setAppAnimations } from "./utils/motionPrefs.js";
 import { DB, usePersistentState } from "./db/db.js";
 
 import { Crest, HubIcon } from "./components/ui.jsx";
 import CommandPalette from "./components/CommandPalette.jsx";
-import { PDF_HOOK, PdfPreview } from "./components/pdf.jsx";
+import { PDF_HOOK } from "./components/pdfHook.js";
+// PdfPreview يجرّ مكتبة html2pdf الثقيلة — يُحمَّل فقط عند فتح معاينة PDF فعلياً
+const PdfPreview = lazy(() => import("./components/pdf.jsx").then(m => ({ default: m.PdfPreview })));
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import ConfirmDialog from "./components/ConfirmDialog.jsx";
 
+// FirstSetup وLogin يُستوردان مباشرة (يُعرَضان قبل أي مصادقة — لا فائدة من تأجيلهما)
 import FirstSetup from "./pages/FirstSetup.jsx";
 import Login from "./pages/Login.jsx";
-import Dashboard from "./pages/Dashboard.jsx";
-import POS from "./pages/POS.jsx";
-import Sales from "./pages/Sales.jsx";
-import Products from "./pages/Products.jsx";
-import Purchases from "./pages/Purchases.jsx";
-import Bookings from "./pages/Bookings.jsx";
-import Suppliers from "./pages/Suppliers.jsx";
-import Customers from "./pages/Customers.jsx";
-import RentalDevices from "./pages/RentalDevices.jsx";
-import Assets from "./pages/Assets.jsx";
-import Tournaments from "./pages/Tournaments.jsx";
-import Coupons from "./pages/Coupons.jsx";
-import Treasury from "./pages/Treasury.jsx";
-import Expenses from "./pages/Expenses.jsx";
-import CapitalLedger from "./pages/CapitalLedger.jsx";
-import Salaries from "./pages/Salaries.jsx";
-import Insights from "./pages/Insights.jsx";
-import Reports from "./pages/Reports.jsx";
-import EmployeeActivity from "./pages/EmployeeActivity.jsx";
-import Users from "./pages/Users.jsx";
-import Inventory from "./pages/Inventory.jsx";
-import Settings from "./pages/Settings.jsx";
-import Alerts from "./pages/Alerts.jsx";
-import Promotions from "./pages/Promotions.jsx";
+// باقي الصفحات تُحمَّل عند الطلب فقط (React.lazy) لتقليل حجم الحزمة الأولى
+const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const POS = lazy(() => import("./pages/POS.jsx"));
+const Sales = lazy(() => import("./pages/Sales.jsx"));
+const Products = lazy(() => import("./pages/Products.jsx"));
+const Purchases = lazy(() => import("./pages/Purchases.jsx"));
+const Bookings = lazy(() => import("./pages/Bookings.jsx"));
+const Suppliers = lazy(() => import("./pages/Suppliers.jsx"));
+const Customers = lazy(() => import("./pages/Customers.jsx"));
+const RentalDevices = lazy(() => import("./pages/RentalDevices.jsx"));
+const Assets = lazy(() => import("./pages/Assets.jsx"));
+const Tournaments = lazy(() => import("./pages/Tournaments.jsx"));
+const Coupons = lazy(() => import("./pages/Coupons.jsx"));
+const Treasury = lazy(() => import("./pages/Treasury.jsx"));
+const Expenses = lazy(() => import("./pages/Expenses.jsx"));
+const CapitalLedger = lazy(() => import("./pages/CapitalLedger.jsx"));
+const Salaries = lazy(() => import("./pages/Salaries.jsx"));
+const Insights = lazy(() => import("./pages/Insights.jsx"));
+const Reports = lazy(() => import("./pages/Reports.jsx"));
+const EmployeeActivity = lazy(() => import("./pages/EmployeeActivity.jsx"));
+const Users = lazy(() => import("./pages/Users.jsx"));
+const Inventory = lazy(() => import("./pages/Inventory.jsx"));
+const Settings = lazy(() => import("./pages/Settings.jsx"));
+const Alerts = lazy(() => import("./pages/Alerts.jsx"));
+const Promotions = lazy(() => import("./pages/Promotions.jsx"));
 
 /* ---- شاشة الإقلاع: تحميل قاعدة البيانات قبل عرض النظام ---- */
 export default function NakheelSystemRoot() {
@@ -79,6 +86,80 @@ export default function NakheelSystemRoot() {
   }
   return <NakheelApp />;
 }
+
+/* أنماط التطبيق كدالة نقية على مستوى الوحدة — تُستدعى من useMemo داخل المكوّن.
+   إبقاؤها خارج الدالة يمنع إعادة إنشاء السلسلة الضخمة في كل رندر. */
+const APP_CSS = (gold, touch, anim) => `
+        @keyframes nkFadeUp { from { opacity:0; transform: translateY(10px);} to {opacity:1; transform:none;} }
+        @keyframes nkPop { 0%{transform:scale(.92);opacity:0} 100%{transform:scale(1);opacity:1} }
+        @keyframes nkGlow { 0%,100%{box-shadow:0 0 0 0 ${gold}44} 50%{box-shadow:0 0 0 6px ${gold}00} }
+        @keyframes nkKCardIn { 0%{opacity:0; transform:translateY(12px)} 100%{opacity:1; transform:none} }
+        @keyframes nkBarGrowY { 0%{transform:scaleY(0)} 100%{transform:scaleY(1)} }
+        @keyframes nkToastShrink { from{width:100%} to{width:0%} }
+        @keyframes nkRowIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
+        .nk-page { animation: ${anim ? "nkFadeUp .35s ease" : "none"}; }
+        .nk-nav-item { transition: ${anim ? "background .18s, color .18s, border-color .18s, transform .18s" : "none"}; }
+        .nk-nav-item:hover { transform: translateX(4px); }
+        .nk-card-hover { transition: ${anim ? "transform .2s, box-shadow .2s" : "none"}; }
+        .nk-card-hover:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.10); }
+        .nk-kcard { animation: ${anim ? "nkKCardIn .4s cubic-bezier(.2,.8,.2,1) both" : "none"}; transition: ${anim ? "transform .18s ease, box-shadow .18s ease" : "none"}; }
+        .nk-kcard:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(20,67,31,.12); }
+        .nk-kcard-bar { transform-origin: top; animation: ${anim ? "nkBarGrowY .5s cubic-bezier(.2,.8,.2,1) .08s both" : "none"}; }
+        .nk-row-in { animation: ${anim ? "nkRowIn .3s ease both" : "none"}; }
+        .nk-theme-transition { transition: ${anim ? "background-color .35s ease, border-color .35s ease, color .35s ease" : "none"}; }
+        .nk-theme-card { animation: ${anim ? "nkKCardIn .35s cubic-bezier(.2,.8,.2,1) both" : "none"}; transition: ${anim ? "transform .18s ease, box-shadow .18s ease, border-color .2s ease, background .2s ease" : "none"}; }
+        .nk-theme-card:hover { transform: translateY(-3px) !important; }
+        * { scrollbar-width: thin; scrollbar-color: ${gold}66 transparent; }
+        /* ---- تحسينات اللمس للأجهزة اللوحية ---- */
+        html { -webkit-text-size-adjust: 100%; }
+        button, input, select, textarea, [role="button"] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        @media (pointer: coarse) {
+          input, select, textarea { font-size: 16px !important; min-height: ${touch}px; }
+          button, [role="button"] { min-height: ${touch}px; }
+        }
+        .nk-tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .nk-tbl-wrap table { min-width: 560px; }
+        /* تلميع بصري: استجابة الضغط والتركيز */
+        button:active { transform: scale(.97); }
+        button, a { transition: ${anim ? "transform .1s ease, background .15s, box-shadow .15s" : "none"}; }
+        input:focus, select:focus, textarea:focus { border-color: ${gold} !important; box-shadow: 0 0 0 3px ${gold}22 !important; }
+        button:focus-visible, [role="button"]:focus-visible, .nk-nav-item:focus-visible { outline: 2px solid ${gold}; outline-offset: 2px; }
+        tbody tr { transition: background .12s; }
+        tbody tr:hover td { background: ${gold}0d; }
+        ::selection { background: ${gold}55; }
+        *::-webkit-scrollbar { width: 8px; height: 8px; }
+        *::-webkit-scrollbar-thumb { background: ${gold}55; border-radius: 4px; }
+        *::-webkit-scrollbar-thumb:hover { background: ${gold}99; }
+        *::-webkit-scrollbar-track { background: transparent; }
+        button:hover { filter: brightness(1.05); }
+        @keyframes nkModalIn { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
+        .nk-modal-in { animation: nkModalIn .25s ease; }
+        /* الخروج — مدّته مرتبطة بـ MODAL_EXIT_MS في ui.jsx؛ تغيير أحدهما يستلزم الآخر */
+        @keyframes nkModalOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(8px) scale(.98); } }
+        @keyframes nkFadeOut { from { opacity: 1; } to { opacity: 0; } }
+        .nk-modal-out { animation: nkModalOut .17s ease forwards; }
+        .nk-backdrop-out { animation: nkFadeOut .17s ease forwards; }
+        /* احترام تفضيل تقليل الحركة في نظام التشغيل — يهمّ ذوي اضطرابات الدهليز.
+           مستقل عن مفتاح الإعدادات داخل النظام: أيّهما طلب التقليل يُحترم.
+           تُستخدم 0.01ms بدل 0 كي تبقى أحداث نهاية الحركة تُطلَق لمن يعتمد عليها. */
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+          }
+        }
+        /* عند الطباعة الاحتياطية: يُطبع المستند فقط */
+        @media print {
+          body.nk-printing * { visibility: hidden !important; }
+          body.nk-printing .nk-pdf-sheet, body.nk-printing .nk-pdf-sheet * { visibility: visible !important; }
+          body.nk-printing .nk-pdf-sheet { position: absolute !important; top: 0; right: 0; left: 0; margin: 0 !important; max-width: none !important; box-shadow: none !important; border-radius: 0 !important; }
+          body.nk-printing-labels * { visibility: hidden !important; }
+          body.nk-printing-labels .nk-label-sheet, body.nk-printing-labels .nk-label-sheet * { visibility: visible !important; }
+          body.nk-printing-labels .nk-label-sheet { position: absolute !important; top: 0; right: 0; left: 0; margin: 0 !important; }
+        }
+`;
 
 function NakheelApp() {
   // session state — لا تُحفظ دائمياً: كل زيارة للموقع تتطلب تسجيل دخول
@@ -122,10 +203,12 @@ function NakheelApp() {
   const [tournaments, setTournaments] = usePersistentState("tournaments", []); // الدوريات والمسابقات
   const [cancellations, setCancellations] = usePersistentState("cancellations", []); // إلغاءات وعدم حضور الحجوزات
   const [auditLog, setAuditLog] = usePersistentState("auditLog", []); // تعديلات الأسعار والإعدادات
+  const [parkedSales, setParkedSales] = usePersistentState("parkedSales", []); // فواتير نقطة البيع المعلَّقة مؤقتاً
   const [rentalDevices, setRentalDevices] = usePersistentState("rentalDevices", []); // أجهزة إلكترونية للتأجير
   const [rentals, setRentals] = usePersistentState("rentals", []); // عمليات التأجير
   const [deductions, setDeductions] = usePersistentState("deductions", []); // خصومات وجزاءات الموظفين (تأخير، مخالفات...)
   const [capitalMoves, setCapitalMoves] = usePersistentState("capitalMoves", []); // ضخ/سحب رأس المال (سيولة خارج دورة البيع والمصاريف)
+  const [reportPresets, setReportPresets] = usePersistentState("reportPresets", []); // إعدادات تقارير محفوظة/مفضّلة
   const [users, setUsers] = usePersistentState("users", SEED_USERS);
   const [bookings, setBookings] = usePersistentState("bookings", {}); // الحجوزات النشطة تنجو من تحديث الصفحة
   const [tables, setTables] = usePersistentState("tables", SEED_TABLES, true);
@@ -145,6 +228,12 @@ function NakheelApp() {
     setToast({ msg, onUndo: opts && opts.onUndo, actionLabel: (opts && opts.actionLabel) || "تراجع" });
     toastTimerRef.current = setTimeout(() => setToast(null), duration);
   };
+
+  // confirm(message, { danger }) — بديل نافذة window.confirm الأصلية، يُستخدم كـ: if (!(await confirm("..."))) return;
+  const [confirmState, setConfirmState] = useState(null);
+  const confirm = (message, opts) => new Promise((resolve) => {
+    setConfirmState({ message, danger: opts && opts.danger, resolve });
+  });
 
   // derived totals
   const totals = useMemo(() => {
@@ -167,6 +256,10 @@ function NakheelApp() {
       .map(iv => ({ ...iv, late: overdueDays(iv), customer: iv.customer }))
       .sort((a, b) => b.late - a.late);
   }, [invoices]);
+
+  // مزامنة مفتاح الحركة مع طبقة GSAP المركزية — تفضيل نظام التشغيل
+  // (prefers-reduced-motion) يُحترم هناك بالتوازي مع هذا المفتاح
+  useEffect(() => { setAppAnimations(settings.animations); }, [settings.animations]);
 
   // ---- مركز التنبيهات الموحّد ----
   const [notifOpen, setNotifOpen] = useState(false);
@@ -255,6 +348,22 @@ function NakheelApp() {
     return () => { clearTimeout(timer); events.forEach(e => window.removeEventListener(e, reset)); };
   }, [user, settings.sessionTimeout]);
 
+  // تطبيق الثيم النشط على اللوحة المشتركة قبل أي رندر — يسبق العودات المبكّرة
+  // كي تحصل شاشتا الإعداد والدخول على ألوان الثيم الصحيحة أيضاً، ولأن appCss
+  // أدناه يقرأ C.gold بعد تحديثه
+  applyTheme(settings);
+
+  /* أنماط التطبيق تُبنى مرة واحدة لا مع كل رندر: كانت سلسلة نصية طويلة تُعاد
+     صياغتها عند كل تحديث حالة (تنقّل، تنبيه، تعديل سلة...). لا تعتمد إلا على
+     لون الثيم ومقاس اللمس ومفتاح الحركة.
+     موضعها هنا فوق العودات المبكّرة إلزامي: الخطافات يجب أن تُستدعى بنفس
+     الترتيب في كل رندر، وإلا انكسر React عند الانتقال من الدخول إلى النظام. */
+  // settings.theme و settings.dark ضروريان رغم أن اللينتر يعدّهما زائدين: applyTheme
+  // يعدّل الكائن C على مستوى الوحدة، فهما الإشارة الوحيدة إلى أن C.gold تغيّر —
+  // ولا سبيل للينتر أن يرى ذلك لأنه يتتبّع المراجع النصية داخل الدالة فقط.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const appCss = useMemo(() => APP_CSS(C.gold, T.touch, settings.animations), [settings.animations, settings.theme, settings.dark]);
+
   // إعداد أولي: إن لم يوجد أي مستخدم (بعد التصفير) → شاشة إنشاء المدير الرئيسي
   if (!users || users.length === 0) {
     return <FirstSetup settings={settings} onCreate={(admin) => { setUsers([admin]); setUser(admin); }} />;
@@ -278,17 +387,18 @@ function NakheelApp() {
     leaves, setLeaves,
     tournaments, setTournaments,
     cancellations, setCancellations,
-    auditLog, setAuditLog,
+    auditLog, setAuditLog, parkedSales, setParkedSales,
     rentalDevices, setRentalDevices,
     rentals, setRentals,
     deductions, setDeductions,
     capitalMoves, setCapitalMoves,
+    reportPresets, setReportPresets,
     bookings, setBookings, completedBookings, setCompletedBookings, tables, setTables,
     cats, setCats,
     settings, setSettings,
     nextCounter: (key) => nextCounter(counters, setCounters, key),
-    totals, showToast, overdueAlerts, notifications,
-    cmdOpen, setCmdOpen, setSearchIntent,
+    totals, showToast, confirm, overdueAlerts, notifications,
+    cmdOpen, setCmdOpen, searchIntent, setSearchIntent,
   };
 
   const can = (perm) => user.perms[perm] || user.role === "مدير";
@@ -374,68 +484,10 @@ function NakheelApp() {
     }
   }
 
+
   return (
     <div dir="rtl" style={{ fontFamily: "'Tajawal',sans-serif", background: C.pg, color: C.ink, minHeight: "100vh", fontSize: T.font.base, transition: settings.animations ? "background .4s ease, color .4s ease" : "none" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet" />
-      <style>{`
-        @keyframes nkFadeUp { from { opacity:0; transform: translateY(10px);} to {opacity:1; transform:none;} }
-        @keyframes nkPop { 0%{transform:scale(.92);opacity:0} 100%{transform:scale(1);opacity:1} }
-        @keyframes nkGlow { 0%,100%{box-shadow:0 0 0 0 ${C.gold}44} 50%{box-shadow:0 0 0 6px ${C.gold}00} }
-        @keyframes nkKCardIn { 0%{opacity:0; transform:translateY(12px)} 100%{opacity:1; transform:none} }
-        @keyframes nkBarGrowY { 0%{transform:scaleY(0)} 100%{transform:scaleY(1)} }
-        @keyframes nkDonutDraw { from { stroke-dashoffset: var(--nk-len, 0); } to { stroke-dashoffset: 0; } }
-        @keyframes nkToastShrink { from{width:100%} to{width:0%} }
-        @keyframes nkRowIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
-        .nk-page { animation: ${settings.animations ? "nkFadeUp .35s ease" : "none"}; }
-        .nk-nav-item { transition: ${settings.animations ? "background .18s, color .18s, border-color .18s, transform .18s" : "none"}; }
-        .nk-nav-item:hover { transform: translateX(4px); }
-        .nk-card-hover { transition: ${settings.animations ? "transform .2s, box-shadow .2s" : "none"}; }
-        .nk-card-hover:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.10); }
-        .nk-kcard { animation: ${settings.animations ? "nkKCardIn .4s cubic-bezier(.2,.8,.2,1) both" : "none"}; transition: ${settings.animations ? "transform .18s ease, box-shadow .18s ease" : "none"}; }
-        .nk-kcard:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(20,67,31,.12); }
-        .nk-kcard-bar { transform-origin: top; animation: ${settings.animations ? "nkBarGrowY .5s cubic-bezier(.2,.8,.2,1) .08s both" : "none"}; }
-        .nk-bar-grow { animation: ${settings.animations ? "nkBarGrowY .5s cubic-bezier(.2,.8,.2,1) both" : "none"}; }
-        .nk-donut-seg { stroke-dashoffset: 0; animation: ${settings.animations ? "nkDonutDraw .7s cubic-bezier(.2,.8,.2,1) forwards" : "none"}; }
-        .nk-row-in { animation: ${settings.animations ? "nkRowIn .3s ease both" : "none"}; }
-        @keyframes nkBarGrowX { 0%{transform:scaleX(0)} 100%{transform:scaleX(1)} }
-        @keyframes nkTrendDraw { from { stroke-dashoffset: var(--nk-tlen, 2000); } to { stroke-dashoffset: 0; } }
-        .nk-bar-grow-x { animation: ${settings.animations ? "nkBarGrowX .5s cubic-bezier(.2,.8,.2,1) both" : "none"}; }
-        .nk-trend-draw { stroke-dashoffset: 0; animation: ${settings.animations ? "nkTrendDraw 1.1s cubic-bezier(.2,.8,.2,1) forwards" : "none"}; }
-        .nk-theme-transition { transition: ${settings.animations ? "background-color .35s ease, border-color .35s ease, color .35s ease" : "none"}; }
-        .nk-theme-card { animation: ${settings.animations ? "nkKCardIn .35s cubic-bezier(.2,.8,.2,1) both" : "none"}; transition: ${settings.animations ? "transform .18s ease, box-shadow .18s ease, border-color .2s ease, background .2s ease" : "none"}; }
-        .nk-theme-card:hover { transform: translateY(-3px) !important; }
-        * { scrollbar-width: thin; scrollbar-color: ${C.gold}66 transparent; }
-        /* ---- تحسينات اللمس للأجهزة اللوحية ---- */
-        html { -webkit-text-size-adjust: 100%; }
-        button, input, select, textarea, [role="button"] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-        @media (pointer: coarse) {
-          input, select, textarea { font-size: 16px !important; min-height: ${T.touch}px; }
-          button, [role="button"] { min-height: ${T.touch}px; }
-        }
-        .nk-tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        .nk-tbl-wrap table { min-width: 560px; }
-        /* تلميع بصري: استجابة الضغط والتركيز */
-        button:active { transform: scale(.97); }
-        button, a { transition: ${settings.animations ? "transform .1s ease, background .15s, box-shadow .15s" : "none"}; }
-        input:focus, select:focus, textarea:focus { border-color: ${C.gold} !important; box-shadow: 0 0 0 3px ${C.gold}22 !important; }
-        button:focus-visible, [role="button"]:focus-visible, .nk-nav-item:focus-visible { outline: 2px solid ${C.gold}; outline-offset: 2px; }
-        tbody tr { transition: background .12s; }
-        tbody tr:hover td { background: ${C.gold}0d; }
-        ::selection { background: ${C.gold}55; }
-        *::-webkit-scrollbar { width: 8px; height: 8px; }
-        *::-webkit-scrollbar-thumb { background: ${C.gold}55; border-radius: 4px; }
-        *::-webkit-scrollbar-thumb:hover { background: ${C.gold}99; }
-        *::-webkit-scrollbar-track { background: transparent; }
-        button:hover { filter: brightness(1.05); }
-        @keyframes nkModalIn { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
-        .nk-modal-in { animation: nkModalIn .25s ease; }
-        /* عند الطباعة الاحتياطية: يُطبع المستند فقط */
-        @media print {
-          body.nk-printing * { visibility: hidden !important; }
-          body.nk-printing .nk-pdf-sheet, body.nk-printing .nk-pdf-sheet * { visibility: visible !important; }
-          body.nk-printing .nk-pdf-sheet { position: absolute !important; top: 0; right: 0; left: 0; margin: 0 !important; max-width: none !important; box-shadow: none !important; border-radius: 0 !important; }
-        }
-      `}</style>
+      <style>{appCss}</style>
 
       {/* TOP BAR (tablet) */}
       {isTab && (
@@ -467,6 +519,13 @@ function NakheelApp() {
             ? <img src={settings.logo} alt="logo" style={{ width: 46, height: 46, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
             : <Crest size={46} />}
           <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14, fontWeight: 900, color: C.gld }}>{settings.clubName}</div><div style={{ fontSize: 9, color: C.gld + "8c", marginTop: 1 }}>{settings.clubSub}</div></div>
+          <button onClick={() => goPage("settings")} title={
+            DB.mode === "supabase" ? "سحابية — Supabase (متزامنة بين الأجهزة)"
+              : DB.mode === "local" ? "محلية — محفوظة على هذا الجهاز فقط"
+              : "مؤقتة — في الذاكرة فقط، ستُفقد عند التحديث"
+          } style={{ position: "relative", background: "rgba(255,255,255,.1)", border: "none", borderRadius: 9, width: 32, height: 32, cursor: "pointer", fontSize: 14, color: DB.mode === "supabase" ? "#4ee08a" : DB.mode === "local" ? C.gld : "#ff7a70", flexShrink: 0 }}>
+            {DB.mode === "supabase" ? "☁️" : DB.mode === "local" ? "💾" : "⚠️"}
+          </button>
           <button onClick={() => setCmdOpen(true)} title="بحث شامل (Ctrl+K)" style={{ position: "relative", background: "rgba(255,255,255,.1)", border: "none", borderRadius: 9, width: 32, height: 32, cursor: "pointer", fontSize: 14, color: C.gld, flexShrink: 0 }}>
             🔎
           </button>
@@ -549,6 +608,8 @@ function NakheelApp() {
       {/* MAIN */}
       <div style={{ marginRight: isTab ? 0 : 225, minHeight: "100vh", padding: isTab ? ".9rem .8rem" : "1.1rem 1.4rem" }}>
         <div className="nk-page" key={page}>
+        <ErrorBoundary resetKey={page} onReset={() => setPage("dashboard")}>
+        <Suspense fallback={<div style={{ textAlign: "center", padding: "3rem 0", color: C.mt, fontSize: 13 }}>⏳ جارٍ التحميل...</div>}>
         {page === "dashboard" && <Dashboard ctx={ctx} go={setPage} />}
         {page === "pos" && <POS ctx={ctx} can={can} />}
         {page === "sales" && <Sales ctx={ctx} can={can} />}
@@ -573,6 +634,8 @@ function NakheelApp() {
         {page === "insights" && <Insights ctx={ctx} />}
         {page === "users" && <Users ctx={ctx} />}
         {page === "settings" && <Settings ctx={ctx} />}
+        </Suspense>
+        </ErrorBoundary>
         </div>
       </div>
 
@@ -592,10 +655,23 @@ function NakheelApp() {
         );
       })()}
 
+      {confirmState && (
+        <ConfirmDialog
+          message={confirmState.message}
+          danger={confirmState.danger}
+          onConfirm={() => { confirmState.resolve(true); setConfirmState(null); }}
+          onCancel={() => { confirmState.resolve(false); setConfirmState(null); }}
+        />
+      )}
+
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} products={products} customers={customers} invoices={invoices} hubs={HUBS} goPage={goPage} setSearchIntent={setSearchIntent} currency={settings.currency || "د.ل"} />
 
       {/* PDF PREVIEW OVERLAY */}
-      {pdfDoc && <PdfPreview doc={pdfDoc} onClose={() => setPdfDoc(null)} />}
+      {pdfDoc && (
+        <Suspense fallback={<div style={{ position: "fixed", inset: 0, zIndex: 700, background: "rgba(12,20,14,.75)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13 }}>⏳ جارٍ تجهيز المعاينة...</div>}>
+          <PdfPreview doc={pdfDoc} onClose={() => setPdfDoc(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }

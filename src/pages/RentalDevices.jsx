@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { PageTop, Btn, KCard, Card, CardHead, Table, Badge, Modal, Field, Inp } from "../components/ui.jsx";
-import { todayISO, toWaNumber } from "../utils/format.js";
+import { todayISO, toWa } from "../utils/format.js";
 
 /* ============================ RENTAL DEVICES (تأجير الأجهزة الإلكترونية) ============================ */
 export default function RentalDevices({ ctx }) {
-  const { rentalDevices, setRentalDevices, rentals, setRentals, setInvoices, user, showToast, settings } = ctx;
+  const { rentalDevices, setRentalDevices, rentals, setRentals, setInvoices, user, showToast, confirm, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force(x => x + 1), 30000); return () => clearInterval(t); }, []); // تحديث العدّادات كل 30ث
@@ -15,7 +15,6 @@ export default function RentalDevices({ ctx }) {
   const [rentModal, setRentModal] = useState(null); // device being rented
   const nowIso = () => { const d = new Date(); d.setSeconds(0, 0); return d.toISOString().slice(0, 16); };
   const [rentForm, setRentForm] = useState({ customer: "", phone: "", days: 1, startAt: nowIso(), pay: "كاش" });
-  const [detail, setDetail] = useState(null); // rental being viewed for return/reminder
 
   const addDevice = () => {
     if (!devForm.name.trim()) { showToast("أدخل اسم الجهاز"); return; }
@@ -31,7 +30,7 @@ export default function RentalDevices({ ctx }) {
 
   const confirmRent = () => {
     if (!rentForm.customer.trim()) { showToast("أدخل اسم الزبون"); return; }
-    const wa = toWaNumber(rentForm.phone);
+    const wa = toWa(rentForm.phone);
     if (!wa || wa.length < 10) { showToast("رقم واتساب الزبون إلزامي وبصيغة صحيحة"); return; }
     const days = Math.max(1, parseInt(rentForm.days) || 1);
     const device = rentModal;
@@ -49,18 +48,17 @@ export default function RentalDevices({ ctx }) {
 
     // إنشاء فاتورة (بلا تكلفة بضاعة — التأجير ليس استهلاكاً للمخزون)
     const invNum = "INV-RT-" + ctx.nextCounter("rtInvoice");
-    setInvoices(iv => [{ id: invNum, customer: rentForm.customer.trim(), date: todayISO(), source: "تأجير", details: `تأجير ${device.name} — ${days} يوم`, pay: rentForm.pay, discount: "—", total, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+    setInvoices(iv => [{ id: invNum, customer: rentForm.customer.trim(), date: todayISO(), source: "تأجير", details: `تأجير ${device.name} — ${days} يوم`, items: [{ cat: "__rental", name: `تأجير ${device.name}`, qty: 1, lineTotal: total }], pay: rentForm.pay, discount: "—", total, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
 
     showToast(`تم تأجير ${device.name} لـ${rentForm.customer.trim()} — ${fmt(total)} ${cur}`);
     setRentModal(null);
   };
 
-  const returnDevice = (rental) => {
-    if (!window.confirm(`تأكيد استرجاع «${rental.deviceName}» من ${rental.customer}؟`)) return;
+  const returnDevice = async (rental) => {
+    if (!(await confirm(`تأكيد استرجاع «${rental.deviceName}» من ${rental.customer}؟`))) return;
     setRentals(rs => rs.map(r => r.id === rental.id ? { ...r, status: "مُرجَع", returnedAt: new Date().toISOString() } : r));
     setRentalDevices(ds => ds.map(d => d.id === rental.deviceId ? { ...d, status: "available" } : d));
     showToast(`تم استرجاع ${rental.deviceName}`);
-    setDetail(null);
   };
 
   const sendEndReminder = (rental) => {
@@ -186,7 +184,7 @@ export default function RentalDevices({ ctx }) {
         <Modal title={`تأجير — ${rentModal.name}`} onClose={() => setRentModal(null)} width={460}>
           <Field label="اسم الزبون *"><Inp value={rentForm.customer} onChange={e => setRentForm({ ...rentForm, customer: e.target.value })} placeholder="الاسم الكامل" /></Field>
           <Field label="رقم واتساب الزبون * (إلزامي)"><Inp value={rentForm.phone} onChange={e => setRentForm({ ...rentForm, phone: e.target.value })} placeholder="0913-000-000" /></Field>
-          {rentForm.phone && <div style={{ fontSize: 11, color: C.mt, marginTop: -6, marginBottom: 10 }}>سيُحفظ كـ: {toWaNumber(rentForm.phone) || "—"} — سيُستخدم لإرسال تذكير قبل انتهاء المدة</div>}
+          {rentForm.phone && <div style={{ fontSize: 11, color: C.mt, marginTop: -6, marginBottom: 10 }}>سيُحفظ كـ: {toWa(rentForm.phone) || "—"} — سيُستخدم لإرسال تذكير قبل انتهاء المدة</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <Field label="المدة (أيام)"><Inp type="number" min="1" value={rentForm.days} onChange={e => setRentForm({ ...rentForm, days: e.target.value })} /></Field>
             <Field label="تاريخ ووقت الاستلام"><Inp type="datetime-local" value={rentForm.startAt} onChange={e => setRentForm({ ...rentForm, startAt: e.target.value })} /></Field>

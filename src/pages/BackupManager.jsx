@@ -5,7 +5,7 @@ import { DB, backupCounts } from "../db/db.js";
 
 /* ============================ BACKUP MANAGER ============================ */
 export default function BackupManager({ ctx }) {
-  const { showToast, settings } = ctx;
+  const { showToast, confirm, settings } = ctx;
   const [, tick] = useState(0);
   const fileRef = useRef(null);
   const lastBackup = DB.lastBackupAt();
@@ -29,15 +29,15 @@ export default function BackupManager({ ctx }) {
   };
 
   const saveInternal = () => {
-    const at = DB.saveAutoBackup(); tick(x => x + 1);
+    DB.saveAutoBackup(); tick(x => x + 1);
     showToast("تم حفظ نسخة احتياطية داخلية");
   };
 
   const restoreInternal = async () => {
     if (!autoBk) return;
-    if (!window.confirm("سيتم استبدال كل البيانات الحالية بالنسخة الداخلية المحفوظة. متابعة؟")) return;
+    if (!(await confirm("سيتم استبدال كل البيانات الحالية بالنسخة الداخلية المحفوظة. متابعة؟", { danger: true }))) return;
     try { await DB.importData(autoBk); showToast("تمت الاستعادة — سيُعاد التحميل"); setTimeout(() => window.location.reload(), 900); }
-    catch (e) { showToast("تعذّرت الاستعادة"); }
+    catch { showToast("تعذّرت الاستعادة"); }
   };
 
   const onFile = (e) => {
@@ -49,11 +49,11 @@ export default function BackupManager({ ctx }) {
         const backup = JSON.parse(reader.result);
         if (!backup.__nakheel_backup) { showToast("هذا الملف ليس نسخة احتياطية صالحة"); return; }
         const cnt = backupCounts(backup.data || {}).join("، ") || "لا عناصر";
-        if (!window.confirm(`استعادة نسخة بتاريخ ${new Date(backup.exportedAt).toLocaleString("ar-LY")}؟\nتحتوي: ${cnt}\n\nسيتم استبدال كل البيانات الحالية.`)) return;
+        if (!(await confirm(`استعادة نسخة بتاريخ ${new Date(backup.exportedAt).toLocaleString("ar-LY")}؟\nتحتوي: ${cnt}\n\nسيتم استبدال كل البيانات الحالية.`, { danger: true }))) return;
         await DB.importData(backup);
         showToast("تمت الاستعادة بنجاح — سيُعاد التحميل");
         setTimeout(() => window.location.reload(), 900);
-      } catch (err) { showToast("تعذّرت قراءة الملف — تأكد أنه نسخة صحيحة"); }
+      } catch { showToast("تعذّرت قراءة الملف — تأكد أنه نسخة صحيحة"); }
     };
     reader.readAsText(file);
     e.target.value = "";

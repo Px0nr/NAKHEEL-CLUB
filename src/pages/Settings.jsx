@@ -7,7 +7,7 @@ import { todayISO } from "../utils/format.js";
 import { DB } from "../db/db.js";
 
 export default function Settings({ ctx }) {
-  const { settings, setSettings, showToast } = ctx;
+  const { settings, setSettings, showToast, confirm } = ctx;
   const [tab, setTab] = useState("appearance");
   const set = (k, v) => setSettings(s => ({ ...s, [k]: v }));
   const fileRef = useRef(null);
@@ -283,7 +283,7 @@ export default function Settings({ ctx }) {
             {DB.error && <div style={{ marginTop: 10, fontSize: 11, color: C.red, background: C.redbg, borderRadius: 8, padding: ".5rem .7rem" }}>⚠ {DB.error}</div>}
             <div style={{ marginTop: 12, borderTop: `0.5px solid ${C.bc}`, paddingTop: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: C.red, marginBottom: 6 }}>منطقة الخطر</div>
-              <Btn danger onClick={() => { if (window.confirm("سيتم مسح كل البيانات نهائياً (بما فيها المستخدمون) والبدء بنظام فارغ. ستظهر شاشة إنشاء حساب المدير من جديد. هل أنت متأكد؟")) DB.reset(); }}>🗑 مسح كل البيانات والبدء من جديد</Btn>
+              <Btn danger onClick={async () => { if (await confirm("سيتم مسح كل البيانات نهائياً (بما فيها المستخدمون) والبدء بنظام فارغ. ستظهر شاشة إنشاء حساب المدير من جديد. هل أنت متأكد؟", { danger: true })) DB.reset(); }}>🗑 مسح كل البيانات والبدء من جديد</Btn>
             </div>
           </Card>
           <Card className="nk-card-hover">

@@ -7,7 +7,7 @@ import { promoActiveNow } from "../utils/promos.js";
 
 /* ============================ PROMOTIONS (التخفيضات والعروض) ============================ */
 export default function Promotions({ ctx }) {
-  const { promotions, setPromotions, cats, showToast, settings } = ctx;
+  const { promotions, setPromotions, cats, showToast } = ctx;
   const [modal, setModal] = useState(false);
   const [editId, setEditId] = useState(null);
   const empty = { name: "", cat: "all", pct: "", from: todayISO(), to: "", period: "allday" };

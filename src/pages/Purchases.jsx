@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { PageTop, Btn, KCard, Card, CardHead, Table, Badge, Modal, Field, Sel, Inp } from "../components/ui.jsx";
+import QuickAddSupplierModal from "../components/QuickAddSupplierModal.jsx";
 import { todayISO, arDate } from "../utils/format.js";
 import { DB } from "../db/db.js";
 
@@ -12,7 +13,6 @@ export default function Purchases({ ctx }) {
   const [modal, setModal] = useState(false);
   const [supplier, setSupplier] = useState("");
   const [newSupModal, setNewSupModal] = useState(false);
-  const [newSup, setNewSup] = useState({ name: "", phone: "", spec: "" });
   const [date, setDate] = useState(todayISO());
   const [pay, setPay] = useState("كاش");
   // each line: prodId, qty, qtyUnit ('pack'|'piece'), buyBasis ('pack'|'piece'), buyPrice, sellPiece, sellPack, exp
@@ -122,7 +122,7 @@ export default function Purchases({ ctx }) {
             <Field label="المورد">
               <div style={{ display: "flex", gap: 6 }}>
                 <Sel value={supplier} onChange={e => setSupplier(e.target.value)} style={{ flex: 1 }}><option value="">اختر المورد...</option>{suppliers.map(s => <option key={s.id}>{s.name}</option>)}</Sel>
-                <Btn sm gold onClick={() => { setNewSup({ name: "", phone: "", spec: "" }); setNewSupModal(true); }} style={{ whiteSpace: "nowrap" }}>+ مورد</Btn>
+                <Btn sm gold onClick={() => setNewSupModal(true)} style={{ whiteSpace: "nowrap" }}>+ مورد</Btn>
               </div>
             </Field>
             <Field label="تاريخ الفاتورة"><Inp type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
@@ -138,7 +138,7 @@ export default function Purchases({ ctx }) {
               <div key={i} style={{ background: C.crm, borderRadius: 10, padding: ".6rem .7rem", marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
                   <Sel value={ln.prodId} onChange={e => setLine(i, "prodId", e.target.value)} style={{ flex: 2.5, background: C.cd }}><option value="">اختر المنتج...</option>{products.map(pr => <option key={pr.id} value={pr.id}>{pr.name}{pr.packSize > 1 ? ` (${pr.unit} = ${pr.packSize} قطعة)` : ""}</option>)}</Sel>
-                  <button onClick={() => delLine(i)} style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 15 }}>✕</button>
+                  <button onClick={() => delLine(i)} aria-label="إزالة الصنف" style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 15 }}>✕</button>
                 </div>
                 {p && (
                   <>
@@ -207,25 +207,7 @@ export default function Purchases({ ctx }) {
         </Modal>
       )}
 
-      {newSupModal && (
-        <Modal title="إضافة مورد جديد" onClose={() => setNewSupModal(false)} width={430}>
-          <Field label="اسم المورد *"><Inp value={newSup.name} onChange={e => setNewSup({ ...newSup, name: e.target.value })} /></Field>
-          <Field label="رقم الهاتف / الواتساب"><Inp value={newSup.phone} onChange={e => setNewSup({ ...newSup, phone: e.target.value })} placeholder="0913-000-000" /></Field>
-          <Field label="التخصص"><Inp value={newSup.spec} onChange={e => setNewSup({ ...newSup, spec: e.target.value })} placeholder="أجهزة ألعاب / مواد كافيه" /></Field>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn gold style={{ flex: 1, justifyContent: "center" }} onClick={() => {
-              if (!newSup.name.trim()) { showToast("أدخل اسم المورد"); return; }
-              let d = (newSup.phone || "").replace(/\D/g, ""); if (d.startsWith("0")) d = "218" + d.slice(1);
-              const s = { id: Math.max(0, ...suppliers.map(x => x.id)) + 1, name: newSup.name.trim(), phone: newSup.phone, wa: d, spec: newSup.spec || "عام", total: 0, due: 0, status: "نشط" };
-              setSuppliers(list => [...list, s]);
-              setSupplier(s.name); // اختره تلقائياً في الفاتورة
-              showToast("تمت إضافة المورد واختياره");
-              setNewSupModal(false);
-            }}>✓ حفظ واختيار</Btn>
-            <Btn onClick={() => setNewSupModal(false)}>إلغاء</Btn>
-          </div>
-        </Modal>
-      )}
+      {newSupModal && <QuickAddSupplierModal onClose={() => setNewSupModal(false)} ctx={ctx} onCreated={(s) => setSupplier(s.name)} />}
     </>
   );
 }

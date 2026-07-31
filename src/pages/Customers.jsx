@@ -6,7 +6,7 @@ import CustomerDetail from "./CustomerDetail.jsx";
 
 /* ============================ CUSTOMERS ============================ */
 export default function Customers({ ctx }) {
-  const { customers, setCustomers, invoices, setInvoices, showToast, settings } = ctx;
+  const { customers, invoices, settings } = ctx;
   const [modal, setModal] = useState(false);
   const [q, setQ] = useState(() => (ctx.searchIntent && ctx.searchIntent.type === "customer") ? ctx.searchIntent.query : "");
   const [filter, setFilter] = useState("all"); // all | debt

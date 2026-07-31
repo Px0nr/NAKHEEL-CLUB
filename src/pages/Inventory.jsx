@@ -2,32 +2,24 @@ import { useState } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { CATS } from "../constants/seeds.js";
 import { PageTop, Btn, KCard, Card, CardHead, Sel, Table, Badge, Modal, Field, Inp } from "../components/ui.jsx";
-import { openPdfDoc } from "../components/pdf.jsx";
+import { openPdfDoc } from "../components/pdfHook.js";
+import WasteModal from "../components/WasteModal.jsx";
 import { todayISO, arDate, daysBetween, matchesBarcodePartial } from "../utils/format.js";
 
 /* ============================ INVENTORY & SHORTAGE ============================ */
 export default function Inventory({ ctx }) {
-  const { products, setProducts, suppliers, waste, setWaste, user, showToast } = ctx;
+  const { products, setProducts, suppliers, waste, user, showToast } = ctx;
   const cur = ctx.settings?.currency || "د.ل";
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all"); // all | low | out | ok
+  const [page, setPage] = useState(1);
   const [modal, setModal] = useState(false);
   const [supplier, setSupplier] = useState("");
   const [orderLines, setOrderLines] = useState([]); // {prodId, qty}
   const [adjust, setAdjust] = useState(null); // product being adjusted
+  const [adjustFrom, setAdjustFrom] = useState(0); // المخزون قبل التعديل — لتسجيله في سجل التدقيق عند الحفظ
   const [wasteItem, setWasteItem] = useState(null); // product being marked as damaged/wasted
-  const [wasteForm, setWasteForm] = useState({ qty: 1, reason: "سكب / انسكاب", note: "", date: todayISO() });
-  const WASTE_REASONS = ["سكب / انسكاب", "تسريب عبوة", "كسر", "انتهاء الصلاحية", "تلف بالتخزين", "أخرى"];
   const wasteTotal30 = waste.filter(w => daysBetween(w.date, todayISO()) <= 30).reduce((s, w) => s + w.cost, 0);
-  const applyWaste = () => {
-    if (!wasteItem) return;
-    const qty = Math.min(wasteItem.stock, Math.max(1, parseInt(wasteForm.qty) || 1));
-    const cost = Math.round((wasteItem.buy || 0) * qty * 100) / 100;
-    setProducts(ps => ps.map(p => p.id === wasteItem.id ? { ...p, stock: Math.max(0, p.stock - qty) } : p));
-    setWaste(w => [{ id: "WS-" + Date.now(), date: wasteForm.date, pid: wasteItem.id, name: wasteItem.name, cat: wasteItem.cat, qty, reason: wasteForm.reason, note: wasteForm.note.trim(), cost, by: user?.name || "—" }, ...w]);
-    showToast(`تم تسجيل إتلاف ${qty} ${wasteItem.unit} من «${wasteItem.name}» — خسارة ${fmt(cost)} ${cur}`);
-    setWasteItem(null); setWasteForm({ qty: 1, reason: "سكب / انسكاب", note: "", date: todayISO() });
-  };
 
   // only stocked products (services have stock=null)
   const stocked = products.filter(p => p.stock !== null);
@@ -49,6 +41,10 @@ export default function Inventory({ ctx }) {
     if (filter === "ok") return st.tone === "g";
     return true;
   });
+  const PAGE_SIZE = 50;
+  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const pageRows = shown.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
 
   // stock adjustment (manual receive/correct)
   const applyAdjust = (delta) => {
@@ -123,9 +119,9 @@ export default function Inventory({ ctx }) {
             <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, background: C.crm, border: `0.5px solid ${C.bc}`, borderRadius: 8, padding: ".3rem .7rem", width: 220 }}>
                 <span style={{ color: C.mt, fontSize: 14 }}>🔍</span>
-                <input value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث عن صنف أو باركود..." style={{ border: "none", outline: "none", background: "transparent", fontSize: 12.5, width: "100%", fontFamily: "inherit" }} />
+                <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="ابحث عن صنف أو باركود..." style={{ border: "none", outline: "none", background: "transparent", fontSize: 12.5, width: "100%", fontFamily: "inherit" }} />
               </div>
-              <Sel value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 130 }}>
+              <Sel value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }} style={{ width: 130 }}>
                 <option value="all">كل الأصناف</option>
                 <option value="ok">متوفر</option>
                 <option value="low">منخفض</option>
@@ -137,25 +133,34 @@ export default function Inventory({ ctx }) {
         {shown.length === 0 ? (
           <div style={{ textAlign: "center", color: C.mt, fontSize: 12.5, padding: "1.5rem 0" }}>لا توجد أصناف مطابقة للبحث.</div>
         ) : (
-          <Table
-            cols={[{ h: "الباركود", w: "13%" }, { h: "الصنف", w: "20%" }, { h: "القسم", w: "10%" }, { h: "المتوفر", w: "10%" }, { h: "الحد الأدنى", w: "10%" }, { h: "مستوى المخزون", w: "19%" }, { h: "الحالة", w: "10%" }, { h: "إجراء", w: "8%" }]}
-            rows={shown.map(p => {
-              const st = statusOf(p);
-              return [
-                <span style={{ fontFamily: "monospace", fontSize: 11, background: C.crm, padding: "2px 6px", borderRadius: 5 }}>{p.bc}</span>,
-                <span style={{ fontWeight: 600 }}>{p.name}</span>,
-                <Badge tone={p.cat === "games" ? "g" : "a"}>{CATS[p.cat]}</Badge>,
-                <span style={{ fontWeight: 700, color: st.tone === "r" ? C.red : st.tone === "a" ? C.gdd : C.grn2 }}>{p.stock} {p.unit}</span>,
-                p.min || "—",
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#eee", overflow: "hidden" }}><div style={{ width: st.pct + "%", height: "100%", background: st.tone === "r" ? "#e34948" : st.tone === "a" ? C.gold : C.grl }} /></div>
-                  <span style={{ fontSize: 10, color: C.mt, minWidth: 28 }}>{st.pct}%</span>
-                </div>,
-                <Badge tone={st.tone}>{st.label}</Badge>,
-                <div style={{ display: "flex", gap: 4 }}><Btn sm onClick={() => setAdjust(p)}>تعديل</Btn><Btn sm danger onClick={() => { setWasteItem(p); setWasteForm({ qty: 1, reason: "سكب / انسكاب", note: "", date: todayISO() }); }}>🗑 إتلاف</Btn></div>,
-              ];
-            })}
-          />
+          <>
+            <Table
+              cols={[{ h: "الباركود", w: "13%" }, { h: "الصنف", w: "20%" }, { h: "القسم", w: "10%" }, { h: "المتوفر", w: "10%" }, { h: "الحد الأدنى", w: "10%" }, { h: "مستوى المخزون", w: "19%" }, { h: "الحالة", w: "10%" }, { h: "إجراء", w: "8%" }]}
+              rows={pageRows.map(p => {
+                const st = statusOf(p);
+                return [
+                  <span style={{ fontFamily: "monospace", fontSize: 11, background: C.crm, padding: "2px 6px", borderRadius: 5 }}>{p.bc}</span>,
+                  <span style={{ fontWeight: 600 }}>{p.name}</span>,
+                  <Badge tone={p.cat === "games" ? "g" : "a"}>{CATS[p.cat]}</Badge>,
+                  <span style={{ fontWeight: 700, color: st.tone === "r" ? C.red : st.tone === "a" ? C.gdd : C.grn2 }}>{p.stock} {p.unit}</span>,
+                  p.min || "—",
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#eee", overflow: "hidden" }}><div style={{ width: st.pct + "%", height: "100%", background: st.tone === "r" ? "#e34948" : st.tone === "a" ? C.gold : C.grl }} /></div>
+                    <span style={{ fontSize: 10, color: C.mt, minWidth: 28 }}>{st.pct}%</span>
+                  </div>,
+                  <Badge tone={st.tone}>{st.label}</Badge>,
+                  <div style={{ display: "flex", gap: 4 }}><Btn sm onClick={() => { setAdjust(p); setAdjustFrom(p.stock); }}>تعديل</Btn><Btn sm danger onClick={() => setWasteItem(p)}>🗑 إتلاف</Btn></div>,
+                ];
+              })}
+            />
+            {totalPages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${C.bc}` }}>
+                <Btn sm onClick={() => setPage(p => Math.max(1, p - 1))} style={{ opacity: pageSafe === 1 ? .4 : 1 }}>‹ السابق</Btn>
+                <span style={{ fontSize: 12, color: C.mt }}>صفحة {pageSafe} من {totalPages}</span>
+                <Btn sm onClick={() => setPage(p => Math.min(totalPages, p + 1))} style={{ opacity: pageSafe === totalPages ? .4 : 1 }}>التالي ›</Btn>
+              </div>
+            )}
+          </>
         )}
       </Card>
 
@@ -173,26 +178,17 @@ export default function Inventory({ ctx }) {
             <Btn onClick={() => applyAdjust(10)}>+ 10</Btn>
             <Btn onClick={() => applyAdjust(1)}>+ 1</Btn>
           </div>
-          <Btn gold onClick={() => { showToast("تم تحديث المخزون"); setAdjust(null); }} style={{ width: "100%", justifyContent: "center" }}>✓ حفظ التعديل</Btn>
+          <Btn gold onClick={() => {
+            if (adjust.stock !== adjustFrom) {
+              ctx.setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: user?.name || "—", type: "تعديل مخزون يدوي", detail: `${adjust.name}: ${adjustFrom} ← ${adjust.stock} ${adjust.unit}` }, ...al]);
+            }
+            showToast("تم تحديث المخزون"); setAdjust(null);
+          }} style={{ width: "100%", justifyContent: "center" }}>✓ حفظ التعديل</Btn>
         </Modal>
       )}
 
       {/* damage / waste modal */}
-      {wasteItem && (
-        <Modal title={`تسجيل إتلاف — ${wasteItem.name}`} onClose={() => setWasteItem(null)} width={440}>
-          <div style={{ fontSize: 12, color: C.mt, marginBottom: 12, background: C.crm, borderRadius: 8, padding: ".55rem .8rem" }}>المتوفر حالياً: <b>{wasteItem.stock} {wasteItem.unit}</b> — سعر الشراء: <b>{fmt(wasteItem.buy || 0)} {cur}</b> / {wasteItem.unit}</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Field label={"الكمية التالفة (" + wasteItem.unit + ")"}><Inp type="number" min="1" max={wasteItem.stock} value={wasteForm.qty} onChange={e => setWasteForm({ ...wasteForm, qty: e.target.value })} /></Field>
-            <Field label="التاريخ"><Inp type="date" value={wasteForm.date} onChange={e => setWasteForm({ ...wasteForm, date: e.target.value })} /></Field>
-            <Field label="السبب" full><Sel value={wasteForm.reason} onChange={e => setWasteForm({ ...wasteForm, reason: e.target.value })}>{WASTE_REASONS.map(r => <option key={r}>{r}</option>)}</Sel></Field>
-            <Field label="ملاحظة (اختياري)" full><Inp value={wasteForm.note} onChange={e => setWasteForm({ ...wasteForm, note: e.target.value })} placeholder="مثال: سقط كوب أثناء التقديم" /></Field>
-          </div>
-          <div style={{ background: "#fdeaea", border: "0.5px solid rgba(192,57,43,.25)", borderRadius: 9, padding: ".6rem .85rem", margin: ".4rem 0 1rem", fontSize: 12.5, display: "flex", justifyContent: "space-between" }}>
-            <span>الخسارة المقدّرة</span><b style={{ color: C.red }}>{fmt(Math.round((wasteItem.buy || 0) * (Math.max(1, parseInt(wasteForm.qty) || 1)) * 100) / 100)} {cur}</b>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}><Btn danger onClick={applyWaste} style={{ flex: 1, justifyContent: "center" }}>🗑 تأكيد الإتلاف وخصمه من المخزون</Btn><Btn onClick={() => setWasteItem(null)}>إلغاء</Btn></div>
-        </Modal>
-      )}
+      {wasteItem && <WasteModal product={wasteItem} onClose={() => setWasteItem(null)} ctx={ctx} cur={cur} />}
 
       {/* سجل الإتلاف الأخير */}
       {waste.length > 0 && (
@@ -230,7 +226,7 @@ export default function Inventory({ ctx }) {
                 </Sel>
                 <Inp type="number" value={ln.qty} onChange={e => setOrderLine(i, "qty", parseInt(e.target.value) || 1)} style={{ width: 70, background: C.cd }} />
                 <span style={{ fontSize: 11, color: C.mt, minWidth: 34 }}>{p?.unit || ""}</span>
-                <button onClick={() => delOrderLine(i)} style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 15 }}>✕</button>
+                <button onClick={() => delOrderLine(i)} aria-label="إزالة الصنف" style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 15 }}>✕</button>
               </div>
             );
           })}
