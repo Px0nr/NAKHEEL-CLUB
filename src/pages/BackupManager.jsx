@@ -8,24 +8,18 @@ export default function BackupManager({ ctx }) {
   const { showToast, confirm, settings } = ctx;
   const [, tick] = useState(0);
   const fileRef = useRef(null);
-  const lastBackup = DB.lastBackupAt();
+  // النسخة كملف هي وحدها ما يُحتسب في حالة الحماية — اللقطة الداخلية تعيش في
+  // نفس التخزين الذي يزول مع الجهاز، فعرضها كـ"آخر نسخة" كان يطمئن بلا مبرّر
+  const lastFile = DB.lastFileBackupAt();
   const autoBk = DB.getAutoBackup();
 
-  // كم مضى منذ آخر نسخة؟
-  const daysSince = lastBackup ? Math.floor((Date.now() - new Date(lastBackup)) / 86400000) : null;
+  const daysSince = lastFile ? Math.floor((Date.now() - new Date(lastFile)) / 86400000) : null;
   const overdue = daysSince === null || daysSince >= (settings.backupFreq || 7);
 
   const downloadBackup = () => {
-    const backup = DB.exportData();
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const stamp = new Date().toISOString().slice(0, 10);
-    a.href = url; a.download = `nakheel-backup-${stamp}.json`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    DB.saveAutoBackup(); tick(x => x + 1);
-    showToast("تم تنزيل النسخة الاحتياطية بنجاح");
+    const name = DB.downloadBackupFile();
+    tick(x => x + 1);
+    showToast(name ? `تم تنزيل ${name}` : "تعذّر تنزيل النسخة");
   };
 
   const saveInternal = () => {
@@ -71,9 +65,9 @@ export default function BackupManager({ ctx }) {
           <span style={{ fontSize: 26 }}>{overdue ? "⚠️" : "✅"}</span>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: overdue ? "#922" : "#1a5c2e" }}>
-              {lastBackup ? `آخر نسخة: ${daysSince === 0 ? "اليوم" : daysSince === 1 ? "أمس" : `منذ ${daysSince} يوم`}` : "لم تُنشأ أي نسخة احتياطية بعد"}
+              {lastFile ? `آخر نسخة كملف: ${daysSince === 0 ? "اليوم" : daysSince === 1 ? "أمس" : `منذ ${daysSince} يوم`}` : "لا توجد نسخة محفوظة كملف"}
             </div>
-            <div style={{ fontSize: 11, color: C.mt }}>{lastBackup ? new Date(lastBackup).toLocaleString("ar-LY") : "يُنصح بإنشاء نسخة الآن"}</div>
+            <div style={{ fontSize: 11, color: C.mt }}>{lastFile ? new Date(lastFile).toLocaleString("ar-LY") : "اللقطات الداخلية لا تحمي من عطب الجهاز — نزّل ملفاً"}</div>
           </div>
         </div>
         {overdue && <Btn gold sm onClick={downloadBackup}>أنشئ نسخة الآن</Btn>}
@@ -93,8 +87,10 @@ export default function BackupManager({ ctx }) {
 
         {/* نسخة داخلية سريعة */}
         <div style={{ border: `0.5px solid ${C.bc}`, borderRadius: 12, padding: "1rem" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>⚡ نسخة داخلية سريعة</div>
-          <div style={{ fontSize: 11, color: C.mt, marginBottom: 10, lineHeight: 1.7 }}>لقطة فورية تُحفظ داخل النظام — مفيدة قبل أي تعديل كبير. {autoBk ? `آخر لقطة: ${new Date(autoBk.exportedAt).toLocaleString("ar-LY")}` : "لا توجد لقطة بعد."}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 4 }}>⚡ لقطة داخلية سريعة</div>
+          <div style={{ fontSize: 11, color: C.mt, marginBottom: 10, lineHeight: 1.7 }}>
+            للتراجع عن خطأ قبل تعديل كبير. <b style={{ color: C.gdd }}>لا تحمي من عطب الجهاز أو مسح بيانات المتصفح</b> — تُحفظ في نفس مكان البيانات. {autoBk ? `آخر لقطة: ${new Date(autoBk.exportedAt).toLocaleString("ar-LY")}` : "لا توجد لقطة بعد."}
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             <Btn onClick={saveInternal} style={{ justifyContent: "center" }}>📸 حفظ لقطة الآن</Btn>
             <Btn onClick={restoreInternal} disabled={!autoBk} style={{ justifyContent: "center", opacity: autoBk ? 1 : .5 }}>↩ استرجاع آخر لقطة</Btn>
@@ -115,7 +111,11 @@ export default function BackupManager({ ctx }) {
       </div>
 
       <div style={{ marginTop: 12, fontSize: 11, color: C.mt, background: C.crm, borderRadius: 8, padding: ".6rem .8rem", lineHeight: 1.8 }}>
-        💡 <b>نصيحة:</b> النسخة كملف هي الأأمن — إن تعطّل الجهاز أو المتصفح تبقى بياناتك سليمة. احتفظ بنسخة أسبوعية على الأقل في مكان منفصل. عند تفعيل Supabase السحابي، بياناتك محفوظة سحابياً أيضاً كطبقة حماية إضافية.
+        💡 يُنزّل النظام نسخة كملف تلقائياً عند كل إغلاق يومي للخزينة.
+        {DB.mode !== "supabase" && (
+          <> لكن الملف يبقى على نفس الجهاز: انقله دورياً إلى فلاشة أو حساب سحابي، فسرقة الجهاز أو تلفه تأخذ الملفات معها.
+          {" "}<b style={{ color: C.gdd }}>تفعيل Supabase هو الحل الوحيد الذي يجعل النسخة خارج الجهاز فعلاً</b> — الخطوات في البطاقة المجاورة.</>
+        )}
       </div>
     </Card>
   );

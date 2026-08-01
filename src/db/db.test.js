@@ -171,6 +171,49 @@ describe("DB auto-backup separation", () => {
   });
 });
 
+describe("DB file-backup tracking", () => {
+  beforeEach(() => {
+    DB.cache = {};
+    DB.mode = "local";
+    DB.lastWriteError = null;
+    DB.onWriteError = null;
+    installFakeStorage({});
+  });
+
+  it("اللقطة الداخلية لا تُسجَّل كنسخة ملف", () => {
+    DB.cache.products = [{ id: 1 }];
+    DB.saveAutoBackup();
+    // كان الاثنان يشتركان في تاريخ واحد، فتُطفئ اللقطة تنبيه النسخ بلا حماية فعلية
+    expect(DB.lastBackupAt()).toBeTruthy();
+    expect(DB.lastFileBackupAt()).toBeNull();
+  });
+
+  it("التنزيل كملف يسجّل تاريخه المنفصل", () => {
+    // بيئة الاختبار node بلا DOM — أدنى ما يحتاجه التنزيل من واجهات المتصفح
+    const clicked = [];
+    globalThis.document = {
+      createElement: () => ({ click() { clicked.push(this.download); }, set href(v) { this._h = v; } }),
+      body: { appendChild() {}, removeChild() {} },
+    };
+    globalThis.URL = { createObjectURL: () => "blob:x", revokeObjectURL() {} };
+    globalThis.Blob = class { constructor(parts) { this.parts = parts; } };
+    try {
+      DB.cache.products = [{ id: 1 }];
+      expect(DB.lastFileBackupAt()).toBeNull();
+      const name = DB.downloadBackupFile();
+      expect(name).toMatch(/^nakheel-backup-\d{4}-\d{2}-\d{2}\.json$/);
+      expect(DB.lastFileBackupAt()).toBeTruthy();
+    } finally {
+      delete globalThis.document; delete globalThis.URL; delete globalThis.Blob;
+    }
+  });
+
+  it("يعيد null بلا DOM بدل أن ينهار", () => {
+    expect(globalThis.document).toBeUndefined(); // بيئة node
+    expect(DB.downloadBackupFile()).toBeNull();
+  });
+});
+
 describe("DB.usage", () => {
   beforeEach(() => { DB.mode = "local"; installFakeStorage({}); });
 

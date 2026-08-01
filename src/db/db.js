@@ -30,6 +30,9 @@ export const DB = {
   error: null,
   onWriteError: null, // (info|null) => void — تضبطها App.jsx لعرض إنذار فشل الحفظ
   lastWriteError: null,
+  // (isoDate) => void — تضبطها App.jsx: تواريخ النسخ تعيش في cache لا في حالة
+  // React، فبلا إخطار يبقى تنبيه "لا توجد نسخة" ظاهراً بعد التنزيل مباشرةً
+  onBackupChange: null,
   subscribers: {}, // key -> Set(callback) — لإشعار مكوّنات usePersistentState بتغييرات الأجهزة الأخرى فوراً
 
   onRemoteChange(key, cb) {
@@ -225,6 +228,32 @@ export const DB = {
     return this.cache.__autobackup || null; // تراجع للنسخة القديمة قبل الفصل
   },
   lastBackupAt() { return this.cache.__lastBackup || null; },
+
+  /* ---------- النسخة كملف (الحماية الحقيقية) ----------
+     تُتابَع بتاريخ منفصل عن اللقطة الداخلية عمداً. كان الاثنان يشتركان في
+     __lastBackup، فكانت لقطة داخلية — أو أي إغلاق يومي — تُصفّر تنبيه "تأخّرت
+     نسختك الاحتياطية" وتُظهر النظام محمياً. وهي لا تحمي من شيء في الواقع:
+     تعيش في نفس التخزين الذي يزول بمسح بيانات المتصفح أو بعطب الجهاز.
+     الملف وحده يخرج من ذلك التخزين، فهو وحده ما يُحتسب في التنبيه. */
+  lastFileBackupAt() { return this.cache.__lastFileBackup || null; },
+
+  // تُنزّل نسخة كاملة كملف .json وتسجّل التاريخ. تُعيد اسم الملف أو null عند التعذّر.
+  downloadBackupFile() {
+    if (typeof document === "undefined") return null;
+    const snap = this.exportData();
+    const name = `nakheel-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    try {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) { console.error("Backup download failed:", e); return null; }
+    this.cache.__lastFileBackup = snap.exportedAt;
+    this.flush("__lastFileBackup");
+    try { this.onBackupChange?.(snap.exportedAt); } catch { /* لا يُسقط التنزيلَ فشلُ المُخطِر */ }
+    return name;
+  },
 
   /* ترحيل النسخ القديمة: تُنقل النسخة من داخل cache إلى مفتاحها المنفصل مرة
      واحدة، فيتقلّص حجم مخزن البيانات فوراً للمستخدمين الحاليين. */

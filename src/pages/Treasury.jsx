@@ -83,9 +83,13 @@ export default function Treasury({ ctx }) {
       closedBy: user.name, closedAt: new Date().toISOString(),
     }, ...cs]);
     DB.flush("closings");
-    // لقطة احتياطية تلقائية عند كل إغلاق يومي — نقطة زمنية طبيعية لنهاية العمل، تحمي من فقدان بيانات اليوم
+    /* الإغلاق اليومي نقطة نهاية العمل الطبيعية — تُحفظ عندها لقطة داخلية سريعة
+       (للتراجع عن خطأ) وتُنزَّل نسخة كملف. الملف وحده يخرج من تخزين المتصفح،
+       فهو الحماية الفعلية من عطب الجهاز أو مسح بيانات المتصفح. */
     DB.saveAutoBackup();
-    showToast(diff === 0 ? "تم الإغلاق — مطابقة تامة ✓ (وحُفظت لقطة احتياطية تلقائية)" : diff < 0 ? `تم تسجيل عجز ${fmt(Math.abs(diff))} ${cur} على ${assignTo}` : `تم حفظ زيادة ${fmt(diff)} ${cur} في النظام`);
+    const file = DB.downloadBackupFile();
+    const base = diff === 0 ? "تم الإغلاق — مطابقة تامة ✓" : diff < 0 ? `تم تسجيل عجز ${fmt(Math.abs(diff))} ${cur} على ${assignTo}` : `تم حفظ زيادة ${fmt(diff)} ${cur} في النظام`;
+    showToast(file ? `${base} — ونُزّلت نسخة احتياطية: ${file}` : base);
     setActual({ cash: "", card: "", transfer: "" }); setAssignTo(""); setNote("");
   };
 

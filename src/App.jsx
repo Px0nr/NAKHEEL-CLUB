@@ -262,6 +262,12 @@ function NakheelApp() {
   // (prefers-reduced-motion) يُحترم هناك بالتوازي مع هذا المفتاح
   useEffect(() => { setAppAnimations(settings.animations); }, [settings.animations]);
 
+  /* تاريخ آخر نسخة كملف كحالة React — يعيش في DB.cache التي لا تُحدِث رندراً،
+     فبلا هذا يبقى تنبيه النسخ ظاهراً بعد التنزيل حتى نبضة الدقيقة التالية.
+     يُعرَّف قبل notifications أدناه لأنها تقرأه (تعريفه بعدها = منطقة ميتة زمنية). */
+  const [lastFileBackup, setLastFileBackup] = useState(DB.lastFileBackupAt());
+  useEffect(() => { DB.onBackupChange = setLastFileBackup; return () => { DB.onBackupChange = null; }; }, []);
+
   // ---- مركز التنبيهات الموحّد ----
   const [notifOpen, setNotifOpen] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
@@ -272,9 +278,11 @@ function NakheelApp() {
     if (overdueAlerts.length > 0) list.push({ id: "debt", icon: "🔔", tone: "r", text: `${overdueAlerts.length} فاتورة آجلة متأخرة — ${fmt(overdueAlerts.reduce((s, a) => s + a.total, 0))} ${cur}`, page: "alerts" });
     const low = products.filter(p => p.stock !== null && p.min && p.stock < p.min);
     if (low.length > 0) list.push({ id: "stock", icon: "📦", tone: "a", text: `${low.length} منتج تحت الحد الأدنى للمخزون`, page: "inventory" });
-    const lastBk = DB.lastBackupAt();
+    // يُحتسب تاريخ النسخة كملف وحده: اللقطة الداخلية تعيش في نفس التخزين الذي
+    // يزول مع الجهاز، فاحتسابها كان يُطفئ التنبيه دون أن يحمي شيئاً
+    const lastBk = lastFileBackup;
     const bkDays = lastBk ? Math.floor((Date.now() - new Date(lastBk)) / 86400000) : null;
-    if (bkDays === null || bkDays >= (settings.backupFreq || 7)) list.push({ id: "backup", icon: "🛡", tone: "gold", text: lastBk ? `مضى ${bkDays} يوم على آخر نسخة احتياطية` : "لم تُنشأ أي نسخة احتياطية بعد", page: "settings" });
+    if (bkDays === null || bkDays >= (settings.backupFreq || 7)) list.push({ id: "backup", icon: "🛡", tone: "gold", text: lastBk ? `مضى ${bkDays} يوم على آخر نسخة محفوظة كملف` : "لا توجد نسخة محفوظة كملف خارج المتصفح", page: "settings" });
     const todayClosing = closings.find(c => c.date === todayISO());
     if (!todayClosing) list.push({ id: "closing", icon: "🔒", tone: "b", text: "لم يُغلق حساب اليوم في الخزينة بعد", page: "treasury" });
     const maintTooLong = assets.filter(a => a.status === "maintenance" && a.maintStart && daysBetween(a.maintStart, todayISO()) > 14);
@@ -282,7 +290,7 @@ function NakheelApp() {
     const rentalsEndingSoon = (rentals || []).filter(r => r.status !== "مُرجَع" && (new Date(r.endAt).getTime() - Date.now()) <= 3600000);
     if (rentalsEndingSoon.length > 0) list.push({ id: "rental", icon: "⏰", tone: "a", text: `${rentalsEndingSoon.length} جهاز مؤجَّر تنتهي مدته خلال ساعة أو متأخر`, page: "rentals" });
     return list;
-  }, [overdueAlerts, products, closings, assets, settings, rentals, nowTick]);
+  }, [overdueAlerts, products, closings, assets, settings, rentals, nowTick, lastFileBackup]);
 
   // ---- البحث الشامل (Ctrl+K) ----
   // searchIntent: عندما ينتقل المستخدم من نتيجة بحث لصفحة معيّنة، تحمل هذه الحالة
@@ -315,6 +323,7 @@ function NakheelApp() {
      يضيع، فالمستخدم يحتاج أن يرى الحالة باستمرار حتى تُعالَج لا لثانيتين. */
   const [writeError, setWriteError] = useState(DB.lastWriteError);
   useEffect(() => { DB.onWriteError = setWriteError; return () => { DB.onWriteError = null; }; }, []);
+
   // اختصار البحث الشامل — يعمل من أي صفحة، بشرط عدم التركيز داخل حقل نصي (لتفادي تعارضه مع الكتابة العادية)
   useEffect(() => {
     const onKey = (e) => {
