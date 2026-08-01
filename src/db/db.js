@@ -11,6 +11,16 @@ import { useState, useEffect } from "react";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
+// المفتاح الذي تُخزَّن تحته النسخة الاحتياطية الداخلية — منفصل عن مخزن البيانات
+// عمداً: كانت تُحفظ داخل cache نفسها، فيكتب كل flush نسخةً مضاعفة من كل البيانات
+const BACKUP_KEY = "nakheel_backup";
+
+// امتلاء الحصة يظهر باسم/رمز مختلف بين المتصفحات — الأسماء والأرقام أدناه تغطيها
+const isQuotaError = (e) => !!e && (
+  e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+  e.code === 22 || e.code === 1014
+);
+
 export const DB = {
   mode: "memory",   // supabase | local | memory
   ready: false,
@@ -18,6 +28,8 @@ export const DB = {
   client: null,
   timers: {},
   error: null,
+  onWriteError: null, // (info|null) => void — تضبطها App.jsx لعرض إنذار فشل الحفظ
+  lastWriteError: null,
   subscribers: {}, // key -> Set(callback) — لإشعار مكوّنات usePersistentState بتغييرات الأجهزة الأخرى فوراً
 
   onRemoteChange(key, cb) {
@@ -109,7 +121,34 @@ export const DB = {
       } else if (this.mode === "local") {
         localStorage.setItem("nakheel_db", JSON.stringify(this.cache));
       }
-    } catch (e) { console.warn("DB flush:", e); }
+      if (this.lastWriteError) { this.lastWriteError = null; this.onWriteError?.(null); } // نجحت كتابة بعد فشل — ارفع الإنذار
+    } catch (e) {
+      /* فشل الحفظ ليس تفصيلاً يُسجَّل في الطرفية: المستخدم يظنّ عمله محفوظاً ويواصل
+         البيع بينما لا شيء يُكتب. يُبلَّغ للواجهة لتعرضه إنذاراً ظاهراً ودائماً. */
+      const info = {
+        key: k, quota: isQuotaError(e), mode: this.mode,
+        at: new Date().toISOString(), message: e?.message || String(e),
+      };
+      this.lastWriteError = info;
+      console.error("DB flush failed:", info);
+      try { this.onWriteError?.(info); } catch { /* لا يُسقط الحفظَ فشلُ معالج الخطأ نفسه */ }
+    }
+  },
+
+  /* تقدير المساحة المستخدَمة في وضع التخزين المحلي — localStorage يخزّن UTF-16
+     فالحجم بالبايت ضعف عدد المحارف. الحدّ 5MB تقريبي (يختلف بين المتصفحات)
+     لكنه كافٍ لإظهار الاقتراب من الامتلاء قبل وقوعه. */
+  usage() {
+    if (this.mode !== "local" || typeof localStorage === "undefined") return null;
+    try {
+      let bytes = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        bytes += (key.length + (localStorage.getItem(key) || "").length) * 2;
+      }
+      const limit = 5 * 1024 * 1024;
+      return { bytes, limit, pct: Math.min(100, Math.round((bytes / limit) * 100)) };
+    } catch { return null; }
   },
 
   // تصفير كامل: يمسح البيانات ويعلّم القاعدة بأنها "مهيّأة فارغة" حتى لا تعود البيانات التجريبية
@@ -159,16 +198,47 @@ export const DB = {
     return true;
   },
 
-  // نسخة احتياطية داخلية تلقائية (تُحفظ في نفس المخزن تحت مفتاح خاص)
+  /* ---------- النسخة الاحتياطية الداخلية ----------
+     تُحفظ تحت مفتاح localStorage منفصل لا داخل cache. الفرق ليس تنظيمياً:
+     flush() يكتب الـcache كاملةً في كل مرة، فوجود نسخة كاملة بداخلها كان
+     يضاعف حجم كل عملية حفظ — كل فاتورة تُكتب مرتين فعلياً. */
   saveAutoBackup() {
     const snap = this.exportData();
-    this.cache.__autobackup = snap;
     this.cache.__lastBackup = snap.exportedAt;
-    this.flush("__autobackup"); this.flush("__lastBackup");
+    try {
+      if (typeof localStorage !== "undefined") localStorage.setItem(BACKUP_KEY, JSON.stringify(snap));
+    } catch (e) {
+      const info = { key: BACKUP_KEY, quota: isQuotaError(e), mode: this.mode, at: new Date().toISOString(), message: e?.message || String(e) };
+      this.lastWriteError = info;
+      console.error("Auto-backup failed:", info);
+      try { this.onWriteError?.(info); } catch { /* تجاهل */ }
+      return null;
+    }
+    this.flush("__lastBackup");
     return snap.exportedAt;
   },
-  getAutoBackup() { return this.cache.__autobackup || null; },
+  getAutoBackup() {
+    try {
+      const raw = typeof localStorage !== "undefined" ? localStorage.getItem(BACKUP_KEY) : null;
+      if (raw) return JSON.parse(raw);
+    } catch { /* نسخة تالفة — تُعامل كغير موجودة */ }
+    return this.cache.__autobackup || null; // تراجع للنسخة القديمة قبل الفصل
+  },
   lastBackupAt() { return this.cache.__lastBackup || null; },
+
+  /* ترحيل النسخ القديمة: تُنقل النسخة من داخل cache إلى مفتاحها المنفصل مرة
+     واحدة، فيتقلّص حجم مخزن البيانات فوراً للمستخدمين الحاليين. */
+  migrateAutoBackup() {
+    if (!this.cache.__autobackup) return false;
+    try {
+      if (typeof localStorage !== "undefined" && !localStorage.getItem(BACKUP_KEY)) {
+        localStorage.setItem(BACKUP_KEY, JSON.stringify(this.cache.__autobackup));
+      }
+    } catch { /* تعذّر النقل — نحذفها من cache على أي حال لتحرير المساحة */ }
+    delete this.cache.__autobackup;
+    this.flush("__autobackup");
+    return true;
+  },
 };
 
 // عدّ العناصر داخل نسخة احتياطية (للعرض)

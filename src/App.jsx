@@ -58,6 +58,7 @@ export default function NakheelSystemRoot() {
       // بعد أول إقلاع ناجح، علّم القاعدة بأنها مهيّأة
       // (البيانات التجريبية زُرعت مرة واحدة؛ لن تعود بعد التصفير)
       DB.clearStaleSession();
+      DB.migrateAutoBackup(); // ينقل النسخة الاحتياطية خارج مخزن البيانات (تشغيل واحد)
       DB.markInitialized();
     };
     boot();
@@ -309,6 +310,11 @@ function NakheelApp() {
   // in-app PDF document preview (no popups)
   const [pdfDoc, setPdfDoc] = useState(null);
   useEffect(() => { PDF_HOOK.show = setPdfDoc; return () => { PDF_HOOK.show = null; }; }, []);
+
+  /* إنذار فشل الحفظ — دائم لا toast عابر: فشل الكتابة يعني أن كل ما يُسجَّل بعده
+     يضيع، فالمستخدم يحتاج أن يرى الحالة باستمرار حتى تُعالَج لا لثانيتين. */
+  const [writeError, setWriteError] = useState(DB.lastWriteError);
+  useEffect(() => { DB.onWriteError = setWriteError; return () => { DB.onWriteError = null; }; }, []);
   // اختصار البحث الشامل — يعمل من أي صفحة، بشرط عدم التركيز داخل حقل نصي (لتفادي تعارضه مع الكتابة العادية)
   useEffect(() => {
     const onKey = (e) => {
@@ -488,6 +494,25 @@ function NakheelApp() {
   return (
     <div dir="rtl" style={{ fontFamily: "'Tajawal',sans-serif", background: C.pg, color: C.ink, minHeight: "100vh", fontSize: T.font.base, transition: settings.animations ? "background .4s ease, color .4s ease" : "none" }}>
       <style>{appCss}</style>
+
+      {/* إنذار فشل الحفظ — يعلو كل شيء ولا يُغلق: ما دام ظاهراً فالعمل الجديد لا يُحفظ */}
+      {writeError && (
+        <div role="alert" style={{
+          position: "fixed", top: 0, insetInline: 0, zIndex: 900, background: "#c0392b", color: "#fff",
+          padding: ".6rem 1rem", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center",
+          justifyContent: "center", gap: 10, flexWrap: "wrap", boxShadow: "0 4px 16px rgba(0,0,0,.3)",
+        }}>
+          <span>
+            ⛔ تعذّر حفظ البيانات — {writeError.quota
+              ? "مساحة التخزين ممتلئة. صدّر نسخة احتياطية ثم احذف صور المنتجات الكبيرة أو صفّر البيانات القديمة."
+              : "خطأ في الكتابة. لا تعتمد على ما يُسجَّل الآن."}
+          </span>
+          <button onClick={() => { setPage("settings"); }} style={{
+            background: "rgba(255,255,255,.18)", border: "1px solid rgba(255,255,255,.5)", color: "#fff",
+            borderRadius: 8, padding: ".2rem .7rem", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+          }}>فتح النسخ الاحتياطي</button>
+        </div>
+      )}
 
       {/* TOP BAR (tablet) */}
       {isTab && (

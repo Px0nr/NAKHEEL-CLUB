@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { C, THEMES, fmt } from "../constants/theme.js";
 import { PageTop, Btn, Card, CardHead, Crest, Field, Inp, inputStyle, Badge } from "../components/ui.jsx";
 import InvoiceDesigner from "./InvoiceDesigner.jsx";
@@ -11,6 +11,8 @@ export default function Settings({ ctx }) {
   const [tab, setTab] = useState("appearance");
   const set = (k, v) => setSettings(s => ({ ...s, [k]: v }));
   const fileRef = useRef(null);
+  // يُقاس عند فتح تبويب قاعدة البيانات فقط — المرور على كل مفاتيح التخزين ليس مجانياً
+  const storage = useMemo(() => (tab === "database" ? DB.usage() : null), [tab]);
 
   const onLogo = (e) => {
     const file = e.target.files?.[0];
@@ -281,6 +283,25 @@ export default function Settings({ ctx }) {
               </div>
             )}
             {DB.error && <div style={{ marginTop: 10, fontSize: 11, color: C.red, background: C.redbg, borderRadius: 8, padding: ".5rem .7rem" }}>⚠ {DB.error}</div>}
+            {/* مقياس المساحة — يجعل الاقتراب من الامتلاء مرئياً قبل أن يفشل الحفظ فجأة */}
+            {storage && (
+              <div style={{ marginTop: 12, borderTop: `0.5px solid ${C.bc}`, paddingTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 5 }}>
+                  <span style={{ fontWeight: 600 }}>المساحة المستخدَمة</span>
+                  <span style={{ color: storage.pct >= 80 ? C.red : C.mt, fontWeight: 600 }}>
+                    {(storage.bytes / 1024 / 1024).toFixed(2)} من ~{(storage.limit / 1024 / 1024).toFixed(0)} م.ب ({storage.pct}%)
+                  </span>
+                </div>
+                <div style={{ height: 8, borderRadius: 4, background: C.crm, overflow: "hidden" }}>
+                  <div style={{ width: storage.pct + "%", height: "100%", background: storage.pct >= 80 ? C.red : storage.pct >= 60 ? C.gold : C.grl }} />
+                </div>
+                {storage.pct >= 60 && (
+                  <div style={{ fontSize: 11, color: C.gdd, marginTop: 6, lineHeight: 1.8 }}>
+                    المساحة تقترب من الامتلاء. صور المنتجات هي أكبر مستهلك عادةً — صدّر نسخة احتياطية واحذف الصور غير الضرورية.
+                  </div>
+                )}
+              </div>
+            )}
             <div style={{ marginTop: 12, borderTop: `0.5px solid ${C.bc}`, paddingTop: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: C.red, marginBottom: 6 }}>منطقة الخطر</div>
               <Btn danger onClick={async () => { if (await confirm("سيتم مسح كل البيانات نهائياً (بما فيها المستخدمون) والبدء بنظام فارغ. ستظهر شاشة إنشاء حساب المدير من جديد. هل أنت متأكد؟", { danger: true })) DB.reset(); }}>🗑 مسح كل البيانات والبدء من جديد</Btn>

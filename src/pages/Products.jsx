@@ -5,6 +5,7 @@ import { genBarcode, BarcodeSVG } from "../components/barcode.jsx";
 import WasteModal from "../components/WasteModal.jsx";
 import LabelPrint from "../components/LabelPrint.jsx";
 import { todayISO, arDate, productBarcodes, matchesBarcodePartial } from "../utils/format.js";
+import { compressImageFile, dataUrlBytes } from "../utils/image.js";
 import { DB } from "../db/db.js";
 
 /* ============================ PRODUCTS ============================ */
@@ -103,13 +104,22 @@ export default function Products({ ctx, can }) {
   };
 
   const imgRef = useRef(null);
-  const onImg = (e) => {
+  /* الصورة تُصغَّر قبل التخزين بدل رفضها لكبر حجمها: تُخزَّن base64 داخل مخزن
+     البيانات المحدود، وأكبر مقاس عرض لها في النظام 46×46 بكسل. الضغط يجعل
+     أي صورة صالحة بدل إرغام المستخدم على تصغيرها يدوياً خارج النظام. */
+  const onImg = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = ""; // يسمح بإعادة اختيار نفس الملف بعد فشل
     if (!file) return;
-    if (file.size > 700000) { showToast("حجم الصورة كبير — اختر أصغر من 700KB"); return; }
-    const reader = new FileReader();
-    reader.onload = () => set("img", reader.result);
-    reader.readAsDataURL(file);
+    try {
+      const before = file.size;
+      const dataUrl = await compressImageFile(file);
+      const after = dataUrlBytes(dataUrl);
+      set("img", dataUrl);
+      showToast(`تم ضغط الصورة: ${Math.round(before / 1024)}KB ← ${Math.round(after / 1024)}KB`);
+    } catch (err) {
+      showToast(err?.message || "تعذّرت معالجة الصورة");
+    }
   };
 
   return (
