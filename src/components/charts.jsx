@@ -48,12 +48,23 @@ function ChartTip({ tip }) {
 export { default as AnimatedNumber } from "./AnimatedNumber.jsx";
 
 /* ---------- أعمدة صغيرة (اتجاه يومي) — مع خط مرجعي متقطع اختياري لمقارنة الأسبوع الماضي ---------- */
-export function MiniBars({ data, prevData, max, color, labels, cur }) {
+// نصف السعة البصرية لخط الربح حول خط الأساس (y=100) — يبقيه ضمن نفس viewBox
+// الحالي (0 0 300 120) بلا حاجة لتوسيعه: يتأرجح بين y=85 (أعلى ربح) وy=115 (أعلى خسارة)
+const PROFIT_SWING = 15;
+
+export function MiniBars({ data, prevData, max, color, labels, cur, profitData }) {
   const { boxRef, tip, showAtRect, hide } = useChartTip();
   const [hoverI, setHoverI] = useState(null);
   const lastI = data.length - 1;
   const heights = data.map(d => Math.max((d / max) * 90, 1));
   const prevHeightsRef = useRef(null);
+  const profitPathRef = useRef(null);
+
+  // مقياس خط الربح مستقل عن مقياس الأعمدة (الإيراد لا يكون سالباً، والربح قد يكون)
+  const profitMax = profitData ? Math.max(1, ...profitData.map(v => Math.abs(v))) : 1;
+  const profitY = (v) => 100 - (v / profitMax) * PROFIT_SWING;
+  const profitPoints = profitData ? profitData.map((v, i) => [20 + i * 46 + 14, profitY(v)]) : null;
+  const profitPath = profitPoints ? profitPoints.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x} ${y}`).join(" ") : "";
 
   useMotion((m) => {
     const prev = prevHeightsRef.current;
@@ -69,19 +80,37 @@ export function MiniBars({ data, prevData, max, color, labels, cur }) {
           { scaleY: 1, transformOrigin: "50% 100%", duration: m.d(D.slow), ease: EASE, overwrite: "auto", willChange: "transform", clearProps: "willChange" });
       }
     });
-  }, { scope: boxRef, dependencies: [heights.join(",")] });
+
+    // خط الربح: يُكشَف بنفس أسلوب TrendChart (getTotalLength بدل رقم ثابت) — شكله
+    // يتغيّر كاملاً مع تغيّر أي قيمة (لا مجرد ارتفاع)، فالكشف التدريجي أوضح من
+    // محاولة تحريك رؤوس مضلَّع بين مجموعتي نقاط مختلفتين.
+    const path = profitPathRef.current;
+    if (path && profitPoints) {
+      const points = gsap.utils.toArray(".nk-mb-profit-pt", boxRef.current);
+      if (m.enabled) {
+        const len = path.getTotalLength() || 1;
+        gsap.fromTo(path, { strokeDasharray: len, strokeDashoffset: len },
+          { strokeDashoffset: 0, duration: m.d(D.slow), ease: EASE, overwrite: "auto",
+            onComplete: () => { path.style.strokeDasharray = "none"; } });
+        gsap.from(points, { scale: 0, transformOrigin: "center", duration: m.d(0.25), delay: m.d(D.slow * 0.6), stagger: m.d(0.04), ease: "back.out(1.7)", overwrite: "auto" });
+      } else {
+        path.style.strokeDasharray = "none";
+      }
+    }
+  }, { scope: boxRef, dependencies: [heights.join(","), profitData?.join(",")] });
 
   return (
     <div ref={boxRef} style={{ position: "relative" }}>
       <div style={{ position: "absolute", top: 0, right: 2, fontSize: 9.5, color: C.mt }}>{fmt(max)}</div>
-      <svg viewBox="0 0 300 120" style={{ width: "100%", height: 120 }} role="img" aria-label={`رسم بياني: ${data.map((d, i) => `${labels?.[i] ?? i + 1}: ${fmt(d)}`).join("، ")}`}>
+      <svg viewBox="0 0 300 120" style={{ width: "100%", height: 120 }} role="img" aria-label={`رسم بياني: ${data.map((d, i) => `${labels?.[i] ?? i + 1}: ${fmt(d)}`).join("، ")}${profitData ? ` — الربح الصافي: ${profitData.map((p, i) => `${labels?.[i] ?? i + 1}: ${fmt(p)}`).join("، ")}` : ""}`}>
         {data.map((d, i) => {
           const h = heights[i];
           const x = 20 + i * 46;
           const isToday = i === lastI;
           const label = labels?.[i] ?? String(i + 1);
           const prevH = prevData?.[i] ? (prevData[i] / max) * 90 : null;
-          const tipText = prevData ? `${label} — ${fmt(d)}${cur ? " " + cur : ""} (الأسبوع الماضي: ${fmt(prevData[i] || 0)}${cur ? " " + cur : ""})` : `${label} — ${fmt(d)}${cur ? " " + cur : ""}`;
+          const profitTxt = profitData ? ` — ${profitData[i] < 0 ? "خسارة" : "ربح"}: ${fmt(profitData[i])}${cur ? " " + cur : ""}` : "";
+          const tipText = (prevData ? `${label} — ${fmt(d)}${cur ? " " + cur : ""} (الأسبوع الماضي: ${fmt(prevData[i] || 0)}${cur ? " " + cur : ""})` : `${label} — ${fmt(d)}${cur ? " " + cur : ""}`) + profitTxt;
           return (
             <g key={i}
               tabIndex={0} role="button" aria-label={tipText} style={{ cursor: "pointer" }}
@@ -89,6 +118,10 @@ export function MiniBars({ data, prevData, max, color, labels, cur }) {
               onMouseLeave={() => { setHoverI(null); hide(); }}
               onFocus={(e) => { setHoverI(i); showAtRect(e.currentTarget.getBoundingClientRect(), tipText); }}
               onBlur={() => { setHoverI(null); hide(); }}>
+              {/* منطقة تحسّس كامل العمود شفافة تحت العمود المرئي — بلا هذه، عمود
+                  قصير مع نقطة ربح مرتفعة/منخفضة عنه لا يستقبل تحويماً في مساحة النقطة
+                  لأن تحسّس <g> محصور بمساحة عناصره المرسومة فعلياً لا العمود بكامله */}
+              {profitData && <rect x={x - 4} y={0} width={36} height={120} fill="transparent" />}
               <rect className="nk-mb-bar" x={x} y={100 - h} width={28} height={h} rx={4}
                 fill={color} opacity={hoverI === null || hoverI === i ? 1 : .55}
                 stroke={isToday ? C.gold : "none"} strokeWidth={isToday ? 2 : 0} />
@@ -99,6 +132,15 @@ export function MiniBars({ data, prevData, max, color, labels, cur }) {
           );
         })}
         <line x1="10" y1="100" x2="290" y2="100" stroke={C.bc} strokeWidth="1" />
+        {profitPoints && (
+          <>
+            <path ref={profitPathRef} d={profitPath} fill="none" stroke={C.gold} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {profitPoints.map(([x, y], i) => (
+              <circle key={i} className="nk-mb-profit-pt" cx={x} cy={y} r={hoverI === i ? 4.5 : 3.5}
+                fill={profitData[i] < 0 ? C.red : C.gold} stroke={C.cd} strokeWidth="1.5" opacity={hoverI === null || hoverI === i ? 1 : .55} />
+            ))}
+          </>
+        )}
       </svg>
       <ChartTip tip={tip} />
     </div>

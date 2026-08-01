@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { categoryTotals, toSegments, categoryColorMap, sourceCat, catLabel, rangePreset, inRange, revenueInRange, CATEGORICAL_LIGHT, CATEGORICAL_DARK, CHART_MUTED, pctDelta, deltaLabel } from "./analytics.js";
+import { categoryTotals, toSegments, categoryColorMap, sourceCat, catLabel, rangePreset, inRange, revenueInRange, CATEGORICAL_LIGHT, CATEGORICAL_DARK, CHART_MUTED, pctDelta, deltaLabel, profitOnDate, topItemsOnDate } from "./analytics.js";
 
 const cats = { games: "ألعاب فيديو", cafe: "كافيه" };
 
@@ -198,5 +198,76 @@ describe("deltaLabel", () => {
   });
   it("appends the optional suffix", () => {
     expect(deltaLabel(120, 100, "د.ل", " عن الأمس")).toBe("20% عن الأمس");
+  });
+});
+
+describe("profitOnDate", () => {
+  it("يطرح تكلفة البضاعة والمصاريف والإتلاف من إيراد اليوم فقط", () => {
+    const invoices = [
+      { date: "2026-07-20", status: "مدفوعة", total: 100, cost: 40 },
+      { date: "2026-07-20", status: "مدفوعة", total: 50, cost: 20 },
+      { date: "2026-07-19", status: "مدفوعة", total: 999, cost: 999 }, // يوم آخر — يُستثنى
+      { date: "2026-07-20", status: "معلقة", total: 500, cost: 1 }, // غير مدفوعة — تُستثنى
+    ];
+    const expenses = [{ date: "2026-07-20", amount: 30 }, { date: "2026-07-19", amount: 999 }];
+    const waste = [{ date: "2026-07-20", cost: 10 }, { date: "2026-07-19", cost: 999 }];
+    // 150 إيراد - 60 تكلفة - 30 مصاريف - 10 إتلاف = 50
+    expect(profitOnDate("2026-07-20", { invoices, expenses, waste })).toBe(50);
+  });
+
+  it("يعيد رقماً سالباً في يوم خسارة", () => {
+    const invoices = [{ date: "2026-07-20", status: "مدفوعة", total: 20, cost: 5 }];
+    const expenses = [{ date: "2026-07-20", amount: 100 }];
+    expect(profitOnDate("2026-07-20", { invoices, expenses, waste: [] })).toBe(-85);
+  });
+
+  it("يتحمّل غياب المصاريف/الإتلاف بلا انهيار", () => {
+    const invoices = [{ date: "2026-07-20", status: "مدفوعة", total: 20, cost: 5 }];
+    expect(profitOnDate("2026-07-20", { invoices })).toBe(15);
+  });
+
+  it("يعيد صفراً ليوم بلا أي فواتير مدفوعة", () => {
+    expect(profitOnDate("2026-07-20", { invoices: [] })).toBe(0);
+  });
+});
+
+describe("topItemsOnDate", () => {
+  const invoices = [
+    { date: "2026-07-20", status: "مدفوعة", items: [
+      { pid: 1, name: "قهوة", qty: 2, lineTotal: 20 },
+      { pid: 2, name: "شاي", qty: 1, lineTotal: 5 },
+    ] },
+    { date: "2026-07-20", status: "مدفوعة", items: [
+      { pid: 1, name: "قهوة", qty: 3, lineTotal: 30 },
+    ] },
+    { date: "2026-07-20", status: "مدفوعة", items: [
+      { pid: null, name: "حجز طاولة", qty: 1, lineTotal: 100, cat: "__booking" }, // اصطناعي — يُستثنى
+    ] },
+    { date: "2026-07-19", status: "مدفوعة", items: [{ pid: 1, name: "قهوة", qty: 99, lineTotal: 990 }] }, // يوم آخر
+    { date: "2026-07-20", status: "معلقة", items: [{ pid: 3, name: "عصير", qty: 5, lineTotal: 50 }] }, // غير مدفوعة
+  ];
+
+  it("يجمع نفس الصنف عبر فواتير متعددة ويرتّب بالإيراد تنازلياً", () => {
+    const top = topItemsOnDate("2026-07-20", invoices);
+    expect(top).toEqual([
+      { pid: 1, name: "قهوة", qty: 5, revenue: 50 },
+      { pid: 2, name: "شاي", qty: 1, revenue: 5 },
+    ]);
+  });
+
+  it("يستثني العناصر الاصطناعية بلا pid والفواتير غير المدفوعة وأيام أخرى", () => {
+    const top = topItemsOnDate("2026-07-20", invoices);
+    expect(top.find(i => i.name === "حجز طاولة")).toBeUndefined();
+    expect(top.find(i => i.name === "عصير")).toBeUndefined();
+    expect(top.reduce((s, i) => s + i.qty, 0)).toBe(6); // لا يشمل الـ99 من اليوم الآخر
+  });
+
+  it("يحترم حدّ العدد المطلوب", () => {
+    const many = [{ date: "d", status: "مدفوعة", items: [1, 2, 3, 4, 5, 6].map(n => ({ pid: n, name: "p" + n, qty: 1, lineTotal: n })) }];
+    expect(topItemsOnDate("d", many, 3)).toHaveLength(3);
+  });
+
+  it("يعيد مصفوفة فارغة بلا فواتير", () => {
+    expect(topItemsOnDate("2026-07-20", [])).toEqual([]);
   });
 });

@@ -128,3 +128,35 @@ export const deltaLabel = (a, b, cur = "", suffix = "") => {
   const diff = Math.round(a - b);
   return `${diff >= 0 ? "+" : ""}${fmt(diff)} ${cur}${suffix}`;
 };
+
+/* ---------- صافي الربح ليوم واحد ---------- */
+// نفس تعريف totals.profit في App.jsx (الإيراد ناقص تكلفة البضاعة المباعة وخسائر
+// الإتلاف والمصاريف) لكن مقصوراً على تاريخ واحد — يُستخدم لرسم اتجاه الربح اليومي
+// بدل الإيراد وحده، فالإيراد قد يرتفع بينما الهامش يتآكل بمصاريف أو إتلاف أكبر.
+export function profitOnDate(date, { invoices, expenses, waste } = {}) {
+  const paidToday = (invoices || []).filter(i => i.date === date && i.status === "مدفوعة");
+  const revenue = paidToday.reduce((s, i) => s + i.total, 0);
+  const cogs = paidToday.reduce((s, i) => s + (i.cost || 0), 0);
+  const expTotal = (expenses || []).filter(e => e.date === date).reduce((s, e) => s + e.amount, 0);
+  const wasteCost = (waste || []).filter(w => w.date === date).reduce((s, w) => s + w.cost, 0);
+  return revenue - cogs - wasteCost - expTotal;
+}
+
+/* ---------- أفضل الأصناف مبيعاً ---------- */
+// عناصر بيع منتجات حقيقية (لها pid) ضمن فواتير مدفوعة ليوم واحد، مجمَّعة بالصنف
+// ومرتَّبة بالإيراد تنازلياً. تُستثنى العناصر الاصطناعية بلا pid (حجوزات/تأجير/
+// أرصدة سابقة) — ليست "أصنافاً" بالمعنى التجاري الذي يقصده هذا الترتيب.
+export function topItemsOnDate(date, invoices, limit = 5) {
+  const map = {};
+  (invoices || []).forEach(inv => {
+    if (inv.date !== date || inv.status !== "مدفوعة") return;
+    (inv.items || []).forEach(it => {
+      if (it.pid == null) return;
+      const k = it.pid;
+      if (!map[k]) map[k] = { pid: k, name: it.name, qty: 0, revenue: 0 };
+      map[k].qty += it.qty || 0;
+      map[k].revenue += it.lineTotal || 0;
+    });
+  });
+  return Object.values(map).sort((a, b) => b.revenue - a.revenue).slice(0, limit);
+}
