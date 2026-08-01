@@ -165,7 +165,7 @@ export default function POS({ ctx, can }) {
     const fresh = rows.filter(el => !seen.has(el.dataset.key));
     seenKeysRef.current = new Set(rows.map(el => el.dataset.key));
     if (!m.enabled || !fresh.length) return;
-    gsap.from(fresh, { autoAlpha: 0, x: m.dirX(-18), duration: m.d(D.base), ease: EASE, overwrite: "auto" });
+    gsap.from(fresh, { autoAlpha: 0, x: m.dirX(-18), duration: m.d(D.base), ease: EASE, overwrite: "auto", willChange: "transform, opacity", clearProps: "willChange" });
   }, { scope: cartRef, dependencies: [itemsKey] });
 
   // تأكيد بصري عند إتمام البيع — لوحة «آخر عملية» تدخل بنبضة خفيفة تلفت النظر

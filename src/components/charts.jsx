@@ -62,11 +62,11 @@ export function MiniBars({ data, prevData, max, color, labels, cur }) {
     bars.forEach((el, i) => {
       if (!prev) {
         // أول ظهور: ينمو العمود من خط الأساس
-        gsap.from(el, { scaleY: 0, transformOrigin: "50% 100%", duration: m.d(D.slow), delay: m.d(i * 0.055), ease: EASE });
+        gsap.from(el, { scaleY: 0, transformOrigin: "50% 100%", duration: m.d(D.slow), delay: m.d(i * 0.055), ease: EASE, willChange: "transform", clearProps: "willChange" });
       } else {
         // تغيّر البيانات: ينتقل من ارتفاعه المعروض سابقاً إلى الجديد
         gsap.fromTo(el, { scaleY: (prev[i] ?? 0) / heights[i] },
-          { scaleY: 1, transformOrigin: "50% 100%", duration: m.d(D.slow), ease: EASE, overwrite: "auto" });
+          { scaleY: 1, transformOrigin: "50% 100%", duration: m.d(D.slow), ease: EASE, overwrite: "auto", willChange: "transform", clearProps: "willChange" });
       }
     });
   }, { scope: boxRef, dependencies: [heights.join(",")] });
@@ -194,10 +194,10 @@ export function CompareBarChart({ data, labelA, labelB, colorA, colorB, cur }) {
     const run = (sel, heights, prevHeights, offset) => {
       gsap.utils.toArray(sel, boxRef.current).forEach((el, i) => {
         if (!prevHeights) {
-          gsap.from(el, { scaleY: 0, transformOrigin: "50% 100%", duration: m.d(D.slow), delay: m.d(i * 0.07 + offset), ease: EASE });
+          gsap.from(el, { scaleY: 0, transformOrigin: "50% 100%", duration: m.d(D.slow), delay: m.d(i * 0.07 + offset), ease: EASE, willChange: "transform", clearProps: "willChange" });
         } else {
           gsap.fromTo(el, { scaleY: (prevHeights[i] ?? 0) / heights[i] },
-            { scaleY: 1, transformOrigin: "50% 100%", duration: m.d(D.slow), ease: EASE, overwrite: "auto" });
+            { scaleY: 1, transformOrigin: "50% 100%", duration: m.d(D.slow), ease: EASE, overwrite: "auto", willChange: "transform", clearProps: "willChange" });
         }
       });
     };
@@ -288,6 +288,9 @@ export function TrendChart({ curSeries, prevSeries, colorA, colorB, cur }) {
 
     // خط التتبّع ونقاطه يتحرّكان بـ quickTo: تحريك مباشر للـ DOM بلا setState،
     // فينزلقان بين نقاط البيانات بدل القفز، وبلا إعادة رندر للمكوّن.
+    // will-change دائم على هذه الثلاثة فقط — لا "كل عنصر تحسّباً": هي طبقة
+    // التفاعل الوحيدة التي تتحرّك مع كل حركة فأرة طوال عمر الرسم المرئي.
+    gsap.set([crossRef.current, dotARef.current, dotBRef.current], { willChange: "transform" });
     const dur = m.d(0.16);
     setters.current = {
       line: gsap.quickTo(crossRef.current, "x", { duration: dur, ease: "power3" }),
@@ -370,10 +373,10 @@ export function RankBarChart({ data, color, cur }) {
     gsap.utils.toArray(".nk-rank-fill", boxRef.current).forEach((el, i) => {
       const to = Math.max(pcts[i], 0.001); // تفادي القسمة على صفر لصنف بلا قيمة
       if (!prev) {
-        gsap.from(el, { scaleX: 0, transformOrigin: "right center", duration: m.d(D.slow), delay: m.d(i * 0.08), ease: EASE });
+        gsap.from(el, { scaleX: 0, transformOrigin: "right center", duration: m.d(D.slow), delay: m.d(i * 0.08), ease: EASE, willChange: "transform", clearProps: "willChange" });
       } else {
         gsap.fromTo(el, { scaleX: Math.max(prev[i] ?? 0, 0) / to },
-          { scaleX: 1, transformOrigin: "right center", duration: m.d(D.slow), ease: EASE, overwrite: "auto" });
+          { scaleX: 1, transformOrigin: "right center", duration: m.d(D.slow), ease: EASE, overwrite: "auto", willChange: "transform", clearProps: "willChange" });
       }
     });
   }, { scope: boxRef, dependencies: [pcts.join(",")] });
