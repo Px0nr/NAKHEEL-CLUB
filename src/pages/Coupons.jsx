@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import QRCode from "qrcode.react";
+import * as QRCodeLib from "qrcode.react";
+const QRCode = QRCodeLib.default || QRCodeLib.QRCode || QRCodeLib;
 import { C } from "../constants/theme.js";
 import { PageTop, Btn, Badge, Modal, Field, Inp } from "../components/ui.jsx";
 import { arDate, todayISO } from "../utils/format.js";
