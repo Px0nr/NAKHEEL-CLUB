@@ -8,8 +8,8 @@ import { useState, useEffect } from "react";
    3) انسخ ملف .env.example إلى .env.local وضع فيه القيم (من Settings → API)
    4) أعد تشغيل خادم التطوير (npm run dev) بعد إنشاء/تعديل .env.local
    ========================================================================= */
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://maqxygjevtikpnacpsxz.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1hcXh5Z2pldnRpa3BuYWNwc3h6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NzgzMTcsImV4cCI6MjEwNDM1NDMxN30.a9eMGbHsEvLeuGQn7WOUhRKdoFt9KI-7I7dMAxv9e8I";
 
 // المفتاح الذي تُخزَّن تحته النسخة الاحتياطية الداخلية — منفصل عن مخزن البيانات
 // عمداً: كانت تُحفظ داخل cache نفسها، فيكتب كل flush نسخةً مضاعفة من كل البيانات
