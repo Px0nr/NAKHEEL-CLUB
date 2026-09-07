@@ -708,7 +708,7 @@ function NakheelApp() {
       {/* PDF PREVIEW OVERLAY */}
       {pdfDoc && (
         <Suspense fallback={<div style={{ position: "fixed", inset: 0, zIndex: 700, background: "rgba(12,20,14,.75)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13 }}>⏳ جارٍ تجهيز المعاينة...</div>}>
-          <PdfPreview doc={pdfDoc} onClose={() => setPdfDoc(null)} />
+          <PdfPreview doc={pdfDoc} onClose={() => setPdfDoc(null)} globalSettings={settings} />
         </Suspense>
       )}
     </div>

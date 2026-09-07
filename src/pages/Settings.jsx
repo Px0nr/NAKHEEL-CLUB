@@ -27,6 +27,7 @@ export default function Settings({ ctx }) {
     { id: "appearance", label: "المظهر والثيمات", icon: "🎨" },
     { id: "pos", label: "نقطة البيع", icon: "🛍" },
     { id: "printers", label: "الطابعات", icon: "🖨" },
+    { id: "printing", label: "إعدادات الطباعة", icon: "📋" },
     { id: "invoice", label: "شكل الفاتورة", icon: "🧾" },
     { id: "content", label: "الكلمات والمعلومات", icon: "✍" },
     { id: "security", label: "الأمان", icon: "🔐" },
@@ -193,6 +194,111 @@ export default function Settings({ ctx }) {
             <span>عند إتمام أي بيع، سيتم تنسيق الفاتورة تلقائياً حسب الطابعة المختارة — الإيصال الحراري يظهر مضغوطاً بعرض 80mm، وطابعة A4 تعرض فاتورة رسمية كاملة.</span>
           </div>
         </Card>
+      )}
+
+      {/* ===== إعدادات الطباعة ===== */}
+      {tab === "printing" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Card className="nk-card-hover">
+            <CardHead title="إعدادات طباعة 80 مم" sub="خصّص حجم الخط والمسافات" />
+
+            <Field label="🔤 حجم الخط (80 مم)">
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="range"
+                  min="7"
+                  max="11"
+                  value={settings.receipt80FontSize || 9}
+                  onChange={(e) => set("receipt80FontSize", parseInt(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontWeight: 700, minWidth: 40 }}>{settings.receipt80FontSize || 9}px</span>
+              </div>
+            </Field>
+
+            <Field label="🪟 الفراغ الداخلي (80 مم)">
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="range"
+                  min="2"
+                  max="10"
+                  value={settings.receipt80Padding || 6}
+                  onChange={(e) => set("receipt80Padding", parseInt(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontWeight: 700, minWidth: 40 }}>{settings.receipt80Padding || 6}px</span>
+              </div>
+            </Field>
+
+            <Field label="📦 خيارات">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={settings.receipt80ShowBarcode !== false}
+                  onChange={(e) => set("receipt80ShowBarcode", e.target.checked)}
+                />
+                <span>إظهار الباركود في 80 مم</span>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={settings.receipt80ShowFooter !== false}
+                  onChange={(e) => set("receipt80ShowFooter", e.target.checked)}
+                />
+                <span>إظهار التذييل</span>
+              </label>
+            </Field>
+          </Card>
+
+          <Card className="nk-card-hover">
+            <CardHead title="إعدادات الطباعة العادية" sub="خصّص حجم الخط والمسافات للفواتير العادية" />
+
+            <Field label="🔤 حجم الخط">
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="range"
+                  min="9"
+                  max="14"
+                  step="0.5"
+                  value={settings.normalFontSize || 11.5}
+                  onChange={(e) => set("normalFontSize", parseFloat(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontWeight: 700, minWidth: 40 }}>{settings.normalFontSize || 11.5}px</span>
+              </div>
+            </Field>
+
+            <Field label="🪟 الفراغ الداخلي">
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="range"
+                  min="8"
+                  max="20"
+                  value={settings.normalPadding || 12}
+                  onChange={(e) => set("normalPadding", parseInt(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontWeight: 700, minWidth: 40 }}>{settings.normalPadding || 12}px</span>
+              </div>
+            </Field>
+
+            <Field label="👣 خيارات">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={settings.normalShowFooter !== false}
+                  onChange={(e) => set("normalShowFooter", e.target.checked)}
+                />
+                <span>إظهار التذييل والتواقيع</span>
+              </label>
+            </Field>
+          </Card>
+
+          <div style={{ gridColumn: "1 / -1", background: C.gold + "12", border: `0.5px solid ${C.gold}55`, borderRadius: 10, padding: ".8rem 1rem", fontSize: 12, color: C.gdd, display: "flex", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>💡</span>
+            <span>استخدم المتحركات (sliders) لتخصيص حجم الخط والمسافات حسب احتياجاتك. التغييرات تطبق تلقائياً عند الطباعة التالية.</span>
+          </div>
+        </div>
       )}
 
       {/* ===== INVOICE DESIGN ===== */}

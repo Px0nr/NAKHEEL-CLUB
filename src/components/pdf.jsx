@@ -1,19 +1,66 @@
 import { useState, useEffect, useRef } from "react";
 import html2pdf from "html2pdf.js";
+import JsBarcode from "jsbarcode";
 import { Crest } from "./ui.jsx";
 
-export function PdfPreview({ doc, onClose }) {
+export function PdfPreview({ doc, onClose, globalSettings }) {
   const s = doc.settings || {};
   const cfg = doc.cfg;
+  const gs = globalSettings || {};
   const sheetRef = useRef(null);
+  const barcodeRef = useRef(null);
   const [state, setState] = useState("preparing"); // preparing | ready | failed
   const [blob, setBlob] = useState(null);
   const [blobUrl, setBlobUrl] = useState(null);
   const [note, setNote] = useState("");
   const [printMode, setPrintMode] = useState("auto"); // auto | receipt80
+  const [showSettings, setShowSettings] = useState(false);
   const docNo = cfg.docNo || ("DOC-" + Date.now().toString().slice(-6));
   const fileName = docNo + ".pdf";
   const isReceiptMode = printMode === "receipt80";
+
+  // إعدادات الطباعة المخزنة (دمج الإعدادات العامة مع localStorage)
+  const [printSettings, setPrintSettings] = useState(() => {
+    try {
+      const local = JSON.parse(localStorage.getItem("print_settings")) || {};
+      return {
+        receipt80FontSize: gs.receipt80FontSize || 9,
+        receipt80Padding: gs.receipt80Padding || 6,
+        normalFontSize: gs.normalFontSize || 11.5,
+        normalPadding: gs.normalPadding || 12,
+        showBarcode: gs.receipt80ShowBarcode !== false,
+        hideFooter: gs.normalShowFooter === false || local.hideFooter,
+      };
+    } catch {
+      return {
+        receipt80FontSize: gs.receipt80FontSize || 9,
+        receipt80Padding: gs.receipt80Padding || 6,
+        normalFontSize: gs.normalFontSize || 11.5,
+        normalPadding: gs.normalPadding || 12,
+        showBarcode: gs.receipt80ShowBarcode !== false,
+        hideFooter: gs.normalShowFooter === false,
+      };
+    }
+  });
+
+  const updatePrintSettings = (newSettings) => {
+    setPrintSettings(prev => {
+      const updated = { ...prev, ...newSettings };
+      localStorage.setItem("print_settings", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // توليد الباركود عند التحديث
+  useEffect(() => {
+    if (barcodeRef.current && isReceiptMode && printSettings.showBarcode !== false) {
+      try {
+        JsBarcode(barcodeRef.current, docNo, { format: "CODE128", width: 1.5, height: 35 });
+      } catch (e) {
+        // تجاهل الأخطاء في الباركود
+      }
+    }
+  }, [docNo, isReceiptMode, printSettings.showBarcode]);
 
   // تجهيز ملف الـPDF تلقائياً عند فتح المعاينة
   useEffect(() => {
@@ -91,15 +138,102 @@ export function PdfPreview({ doc, onClose }) {
         {state === "ready" && (
           <>
             <button onClick={() => printDoc("auto")} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة عادية</button>
-            <button onClick={() => printDoc("receipt80")} style={btn("#ff9800", "#fff")}>🧾 طباعة 80 مم (موفّر ورق)</button>
+            <button onClick={() => printDoc("receipt80")} style={btn("#ff9800", "#fff")}>🧾 طباعة 80 مم</button>
           </>
         )}
         {state !== "ready" && <button onClick={() => printDoc()} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة / حفظ</button>}
+        <button onClick={() => setShowSettings(!showSettings)} style={btn("rgba(255,255,255,.14)", "#fff")}>⚙️ إعدادات</button>
         <button onClick={onClose} style={btn("rgba(255,255,255,.14)", "#fff")}>✕ إغلاق</button>
       </div>
       <div style={{ background: state === "ready" ? "#e8f8ee" : "#fdf6e3", color: state === "ready" ? "#1a5c2e" : "#8a6a20", fontSize: 11.5, padding: "6px 14px", textAlign: "center" }}>
         {hint}
       </div>
+
+      {/* نافذة الإعدادات */}
+      {showSettings && (
+        <div style={{ background: "#f5f1e8", borderBottom: "1px solid #ddd", padding: "12px 14px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 600 }}>
+            <div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={printSettings.showBarcode !== false}
+                  onChange={(e) => updatePrintSettings({ showBarcode: e.target.checked })}
+                />
+                📦 إظهار الباركود في 80 مم
+              </label>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+                📏 حجم الخط (80 مم): <b>{printSettings.receipt80FontSize || 9}px</b>
+              </label>
+              <input
+                type="range"
+                min="7"
+                max="11"
+                value={printSettings.receipt80FontSize || 9}
+                onChange={(e) => updatePrintSettings({ receipt80FontSize: parseInt(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+                📏 حجم الخط (عادي): <b>{printSettings.normalFontSize || 11.5}px</b>
+              </label>
+              <input
+                type="range"
+                min="9"
+                max="14"
+                step="0.5"
+                value={printSettings.normalFontSize || 11.5}
+                onChange={(e) => updatePrintSettings({ normalFontSize: parseFloat(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+                🪟 الفراغ (80 مم): <b>{printSettings.receipt80Padding || 6}px</b>
+              </label>
+              <input
+                type="range"
+                min="2"
+                max="10"
+                value={printSettings.receipt80Padding || 6}
+                onChange={(e) => updatePrintSettings({ receipt80Padding: parseInt(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+                🪟 الفراغ (عادي): <b>{printSettings.normalPadding || 12}px</b>
+              </label>
+              <input
+                type="range"
+                min="8"
+                max="20"
+                value={printSettings.normalPadding || 12}
+                onChange={(e) => updatePrintSettings({ normalPadding: parseInt(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={printSettings.hideFooter !== true}
+                  onChange={(e) => updatePrintSettings({ hideFooter: !e.target.checked })}
+                />
+                👣 إظهار التذييل
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* المستند */}
       <div style={{ flex: 1, overflowY: "auto", padding: isReceiptMode ? "8px 5px" : "18px 10px" }}>
@@ -107,12 +241,12 @@ export function PdfPreview({ doc, onClose }) {
           maxWidth: isReceiptMode ? 220 : 780,
           margin: "0 auto",
           background: "#fff",
-          padding: isReceiptMode ? "12px 10px" : "26px 30px",
+          padding: isReceiptMode ? `${printSettings.receipt80Padding || 6}px 10px` : `26px ${printSettings.normalPadding || 12}px`,
           borderRadius: isReceiptMode ? 2 : 6,
           boxShadow: isReceiptMode ? "none" : "0 8px 30px rgba(0,0,0,.35)",
           fontFamily: "'Tajawal',sans-serif",
           color: "#1a1a18",
-          fontSize: isReceiptMode ? "11px" : "16px"
+          fontSize: isReceiptMode ? `${printSettings.receipt80FontSize || 9}px` : `${printSettings.normalFontSize || 11.5}px`
         }}>
           {/* الترويسة */}
           <div style={{
@@ -151,6 +285,14 @@ export function PdfPreview({ doc, onClose }) {
             <div>رقم: {docNo}</div>
           </div>}
 
+          {/* باركود في 80 مم */}
+          {isReceiptMode && printSettings.showBarcode !== false && (
+            <div style={{ textAlign: "center", marginBottom: isReceiptMode ? 4 : 12 }}>
+              <svg ref={barcodeRef} style={{ margin: "0 auto", maxWidth: "100%" }}></svg>
+              <div style={{ fontSize: isReceiptMode ? 8 : 10, color: D.mt, marginTop: 2 }}>{docNo}</div>
+            </div>
+          )}
+
           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12 }}>
             <thead><tr>{cfg.columns.map((c, i) => <th key={i} style={th}>{c}</th>)}</tr></thead>
             <tbody>{cfg.rows.map((r, ri) => (
@@ -179,16 +321,18 @@ export function PdfPreview({ doc, onClose }) {
             <div style={{ width: 150, borderTop: "1px dashed #aaa", textAlign: "center", paddingTop: 4 }}>توقيع المستلم</div>
             <div style={{ width: 150, borderTop: "1px dashed #aaa", textAlign: "center", paddingTop: 4 }}>الختم / الإدارة</div>
           </div>}
-          <div style={{ textAlign: "center", fontSize: isReceiptMode ? 8 : 10, color: D.mt, borderTop: isReceiptMode ? "none" : "1px solid rgba(201,168,76,.4)", paddingTop: isReceiptMode ? 4 : 8, marginTop: isReceiptMode ? 6 : 10 }}>
-            {isReceiptMode ? (
-              <div>
-                <div style={{ fontSize: 9, fontWeight: 600 }}>{new Date().toLocaleDateString("ar-LY", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</div>
-                <div style={{ marginTop: 2 }}>شكراً لتعاملكم 🙏</div>
-              </div>
-            ) : (
-              <>{s.invoiceFooter || "شكراً لتعاملكم — " + (s.clubName || "نادي النخيل")} — مستند مُولّد آلياً</>
-            )}
-          </div>
+          {printSettings.hideFooter !== true && (
+            <div style={{ textAlign: "center", fontSize: isReceiptMode ? 8 : 10, color: D.mt, borderTop: isReceiptMode ? "none" : "1px solid rgba(201,168,76,.4)", paddingTop: isReceiptMode ? 4 : 8, marginTop: isReceiptMode ? 6 : 10 }}>
+              {isReceiptMode ? (
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 600 }}>{new Date().toLocaleDateString("ar-LY", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</div>
+                  <div style={{ marginTop: 2 }}>شكراً لتعاملكم 🙏</div>
+                </div>
+              ) : (
+                <>{s.invoiceFooter || "شكراً لتعاملكم — " + (s.clubName || "نادي النخيل")} — مستند مُولّد آلياً</>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
