@@ -49,21 +49,19 @@ export default function Coupons({ ctx }) {
       return;
     }
 
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      showToast("❌ تحقق من حجب النوافذ المنبثقة");
-      return;
-    }
-
-    const expDate = coupon.exp ? arDate(coupon.exp) : "غير محدد";
-    const html = `
+    try {
+      const expDate = coupon.exp ? arDate(coupon.exp) : "غير محدد";
+      const html = `
 <!DOCTYPE html>
 <html dir="rtl">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>كوبون - ${coupon.code}</title>
   <style>
-    body { margin: 0; padding: 0; font-family: Arial, sans-serif; background: white; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    body { font-family: Arial, sans-serif; background: white; display: flex; align-items: center; justify-content: center; }
     .coupon {
       width: 80mm;
       padding: 8mm;
@@ -77,7 +75,10 @@ export default function Coupons({ ctx }) {
     .discount-num { font-size: 32px; font-weight: bold; color: #c9a84c; margin: 4mm 0; }
     .code { font-family: monospace; font-size: 14px; color: #c9a84c; margin: 3mm 0; letter-spacing: 1px; }
     .footer { font-size: 8px; color: #a0a0a0; margin-top: 4mm; }
-    @media print { body { margin: 0; } .coupon { margin: 0; } }
+    @media print {
+      body { margin: 0; padding: 0; display: block; }
+      .coupon { margin: 0; page-break-after: avoid; }
+    }
   </style>
 </head>
 <body>
@@ -95,16 +96,43 @@ export default function Coupons({ ctx }) {
       <div style="margin-top: 2mm; font-size: 7px;">طبع: ${new Date().toLocaleDateString("ar-EG")}</div>
     </div>
   </div>
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 100);
+    };
+  </script>
 </body>
 </html>`;
 
-    try {
-      printWindow.document.write(html);
-      printWindow.document.close();
+      // طريقة بديلة: استخدام Blob و object URL
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
 
-      setTimeout(() => {
-        printWindow.print();
-      }, 300);
+      // فتح في نافذة جديدة أو tab
+      const printWindow = window.open(url, "_blank", "width=800,height=600");
+
+      // إذا فشل فتح النافذة، استخدم طريقة بديلة
+      if (!printWindow) {
+        // طريقة بديلة: استخدام iframe
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.onload = function() {
+          iframe.contentWindow.document.write(html);
+          iframe.contentWindow.document.close();
+          setTimeout(() => {
+            iframe.contentWindow.print();
+          }, 100);
+        };
+        iframe.src = "about:blank";
+        document.body.appendChild(iframe);
+
+        showToast("✓ جاري تحضير الطباعة (بدون نافذة منبثقة)");
+      } else {
+        showToast("✓ افتح قائمة الطباعة (Ctrl+P أو Cmd+P)");
+        URL.revokeObjectURL(url);
+      }
 
       // تسجيل الطباعة
       const record = {
@@ -117,7 +145,6 @@ export default function Coupons({ ctx }) {
       setPrintHistory(newHistory);
       localStorage.setItem("coupon_print_history", JSON.stringify(newHistory));
 
-      showToast("✓ تم فتح نافذة الطباعة");
       setPrintModal(null);
     } catch (error) {
       showToast("❌ خطأ في الطباعة: " + (error.message || "غير معروف"));
