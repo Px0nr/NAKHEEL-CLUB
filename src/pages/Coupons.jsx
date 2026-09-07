@@ -6,79 +6,70 @@ import { PageTop, Btn, Badge, Modal, Field, Inp } from "../components/ui.jsx";
 import { arDate, todayISO } from "../utils/format.js";
 
 /* نموذج الطباعة للكوبون */
-function CouponPrintTemplate({ coupon }) {
+function CouponPrintTemplate({ coupon, showToast }) {
   const qrRef = useRef();
 
   const handlePrint = () => {
-    if (!qrRef.current) {
-      alert("جارٍ تحضير رمز QR... يرجى المحاولة مرة أخرى");
-      return;
-    }
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert("فشل فتح نافذة الطباعة. تحقق من حجب النوافذ المنبثقة");
-      return;
-    }
-    const canvas = qrRef.current.querySelector("canvas");
-    if (!canvas) {
-      alert("خطأ في توليد رمز QR");
-      return;
-    }
-    const qrDataUrl = canvas.toDataURL("image/png");
+    try {
+      if (!qrRef.current) {
+        showToast("❌ جارٍ تحضير رمز QR... يرجى المحاولة مرة أخرى");
+        return;
+      }
 
-    const html = `
+      const canvas = qrRef.current.querySelector("canvas");
+      if (!canvas) {
+        showToast("❌ خطأ في توليد رمز QR - جرب إعادة تحميل الصفحة");
+        return;
+      }
+
+      let qrDataUrl;
+      try {
+        qrDataUrl = canvas.toDataURL("image/png");
+      } catch (e) {
+        showToast("❌ لا يمكن تصدير رمز QR - جرب متصفح مختلف");
+        console.error("QR Export Error:", e);
+        return;
+      }
+
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        showToast("❌ فشل فتح نافذة الطباعة - تحقق من حجب النوافذ المنبثقة");
+        return;
+      }
+
+      const html = `
       <!DOCTYPE html>
       <html dir="rtl">
       <head>
         <meta charset="UTF-8">
-        <title>طباعة كوبون</title>
+        <title>كوبون خصم - ${coupon.code}</title>
         <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
           body { margin: 0; padding: 0; font-family: 'Arial', sans-serif; background: white; }
           .coupon {
             width: 80mm;
-            height: 100mm;
-            margin: 0 auto;
+            height: auto;
             padding: 8mm;
             border: 2px solid #c9a84c;
             border-radius: 8px;
             background: linear-gradient(135deg, #0a2712 0%, #14431f 100%);
             color: white;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            box-sizing: border-box;
+            text-align: center;
           }
-          .header { text-align: center; margin-bottom: 6mm; }
-          .club-name { font-size: 18px; font-weight: bold; color: #c9a84c; margin-bottom: 2mm; }
-          .coupon-title { font-size: 12px; color: #f0d080; }
-
-          .content { text-align: center; margin: 6mm 0; }
-          .discount {
-            font-size: 36px;
-            font-weight: bold;
-            color: #c9a84c;
-            margin: 4mm 0;
-          }
-          .discount-text { font-size: 11px; color: #f0d080; }
-
-          .code {
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-            font-weight: bold;
-            letter-spacing: 2px;
-            color: #c9a84c;
-            margin: 4mm 0;
-          }
-
+          .header { margin-bottom: 6mm; }
+          .club-name { font-size: 16px; font-weight: bold; color: #c9a84c; margin-bottom: 2mm; }
+          .coupon-title { font-size: 11px; color: #f0d080; }
+          .content { margin: 6mm 0; }
+          .discount { font-size: 32px; font-weight: bold; color: #c9a84c; margin: 3mm 0; }
+          .discount-text { font-size: 10px; color: #f0d080; }
+          .code { font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold; letter-spacing: 1px; color: #c9a84c; margin: 3mm 0; }
           .qr-section { text-align: center; margin: 4mm 0; }
-          .qr-section img { width: 50mm; height: 50mm; }
-
-          .footer { text-align: center; font-size: 9px; color: #a0a0a0; margin-top: 4mm; }
-          .exp-date { font-size: 10px; color: #f0d080; margin: 2mm 0; }
-
+          .qr-section img { width: 45mm; height: 45mm; }
+          .footer { text-align: center; font-size: 8px; color: #a0a0a0; margin-top: 4mm; }
+          .exp-date { font-size: 9px; color: #f0d080; margin: 1mm 0; }
           @media print {
-            body { margin: 0; padding: 0; }
-            .coupon { margin: 0; box-shadow: none; }
+            body { margin: 0; padding: 0; background: white; }
+            .coupon { margin: 0; box-shadow: none; page-break-after: avoid; }
           }
         </style>
       </head>
@@ -88,34 +79,42 @@ function CouponPrintTemplate({ coupon }) {
             <div class="club-name">🌴 نادي النخيل</div>
             <div class="coupon-title">كوبون خصم حصري</div>
           </div>
-
           <div class="content">
             <div class="discount-text">خصم</div>
             <div class="discount">${coupon.pct}%</div>
             <div class="code">${coupon.code}</div>
           </div>
-
           <div class="qr-section">
             <img src="${qrDataUrl}" alt="QR Code">
           </div>
-
           <div class="footer">
             <div class="exp-date">ينتهي: ${arDate(coupon.exp)}</div>
             <div>استخدم: ${coupon.desc || "على جميع الخدمات"}</div>
-            <div style="margin-top: 2mm; font-size: 8px;">طُبِعَ: ${new Date().toLocaleDateString('ar-EG')}</div>
+            <div style="margin-top: 1mm; font-size: 7px;">طُبِعَ: ${new Date().toLocaleDateString('ar-EG')}</div>
           </div>
         </div>
       </body>
       </html>
     `;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+      printWindow.document.write(html);
+      printWindow.document.close();
 
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-    }, 500);
+      setTimeout(() => {
+        try {
+          printWindow.print();
+          setTimeout(() => printWindow.close(), 1000);
+        } catch (e) {
+          showToast("❌ خطأ في الطباعة");
+          console.error("Print Error:", e);
+        }
+      }, 500);
+
+      showToast("✓ تم فتح نافذة الطباعة");
+    } catch (error) {
+      showToast("❌ حدث خطأ غير متوقع: " + error.message);
+      console.error("Print Error:", error);
+    }
   };
 
   return (
@@ -289,7 +288,7 @@ export default function Coupons({ ctx }) {
 
       {printModal && printModal !== "history" && (
         <Modal title={`طباعة كوبون: ${printModal.code}`} onClose={() => setPrintModal(null)} width={450}>
-          <CouponPrintTemplate coupon={printModal} />
+          <CouponPrintTemplate coupon={printModal} showToast={showToast} />
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
             <Btn
               gold
