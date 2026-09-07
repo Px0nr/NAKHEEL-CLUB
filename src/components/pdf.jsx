@@ -10,8 +10,10 @@ export function PdfPreview({ doc, onClose }) {
   const [blob, setBlob] = useState(null);
   const [blobUrl, setBlobUrl] = useState(null);
   const [note, setNote] = useState("");
+  const [printMode, setPrintMode] = useState("auto"); // auto | receipt80
   const docNo = cfg.docNo || ("DOC-" + Date.now().toString().slice(-6));
   const fileName = docNo + ".pdf";
+  const isReceiptMode = printMode === "receipt80";
 
   // تجهيز ملف الـPDF تلقائياً عند فتح المعاينة
   useEffect(() => {
@@ -51,9 +53,14 @@ export function PdfPreview({ doc, onClose }) {
     } catch { /* المستخدم أغلق قائمة المشاركة */ }
   };
 
-  const printDoc = () => {
+  const printDoc = (mode = "auto") => {
     document.body.classList.add("nk-printing");
-    const done = () => { document.body.classList.remove("nk-printing"); window.removeEventListener("afterprint", done); };
+    if (mode === "receipt80") document.body.classList.add("nk-receipt-print");
+    const done = () => {
+      document.body.classList.remove("nk-printing");
+      document.body.classList.remove("nk-receipt-print");
+      window.removeEventListener("afterprint", done);
+    };
     window.addEventListener("afterprint", done);
     setTimeout(done, 3000);
     window.print();
@@ -66,8 +73,8 @@ export function PdfPreview({ doc, onClose }) {
         : "✅ الملف جاهز — نزّله أو شاركه عبر واتساب 📎 مباشرة");
 
   const D = { grn: "#1a5c2e", gold: "#c9a84c", gld: "#f0d080", mt: "#7a7870", crm: "#faf8f2" };
-  const th = { background: D.grn, color: D.gld, padding: "7px 9px", textAlign: "right", fontSize: 11.5, fontWeight: 700 };
-  const td = { padding: "6px 9px", borderBottom: "0.5px solid #e8e4d8", fontSize: 11.5, color: "#1a1a18" };
+  const th = { background: D.grn, color: D.gld, padding: isReceiptMode ? "4px 5px" : "7px 9px", textAlign: "right", fontSize: isReceiptMode ? 9 : 11.5, fontWeight: 700 };
+  const td = { padding: isReceiptMode ? "3px 5px" : "6px 9px", borderBottom: "0.5px solid #e8e4d8", fontSize: isReceiptMode ? 9 : 11.5, color: "#1a1a18" };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 700, background: "rgba(12,20,14,.75)", display: "flex", flexDirection: "column" }}>
@@ -81,7 +88,13 @@ export function PdfPreview({ doc, onClose }) {
           </>
         )}
         {state === "preparing" && <span style={{ ...btn("rgba(255,255,255,.14)", "#fff"), cursor: "default" }}>⏳ تجهيز الملف...</span>}
-        <button onClick={printDoc} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة / حفظ</button>
+        {state === "ready" && (
+          <>
+            <button onClick={() => printDoc("auto")} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة عادية</button>
+            <button onClick={() => printDoc("receipt80")} style={btn("#ff9800", "#fff")}>🧾 طباعة 80 مم (موفّر ورق)</button>
+          </>
+        )}
+        {state !== "ready" && <button onClick={() => printDoc()} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة / حفظ</button>}
         <button onClick={onClose} style={btn("rgba(255,255,255,.14)", "#fff")}>✕ إغلاق</button>
       </div>
       <div style={{ background: state === "ready" ? "#e8f8ee" : "#fdf6e3", color: state === "ready" ? "#1a5c2e" : "#8a6a20", fontSize: 11.5, padding: "6px 14px", textAlign: "center" }}>
@@ -89,31 +102,54 @@ export function PdfPreview({ doc, onClose }) {
       </div>
 
       {/* المستند */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 10px" }}>
-        <div ref={sheetRef} className="nk-pdf-sheet" dir="rtl" style={{ maxWidth: 780, margin: "0 auto", background: "#fff", padding: "26px 30px", borderRadius: 6, boxShadow: "0 8px 30px rgba(0,0,0,.35)", fontFamily: "'Tajawal',sans-serif", color: "#1a1a18" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: isReceiptMode ? "8px 5px" : "18px 10px" }}>
+        <div ref={sheetRef} className="nk-pdf-sheet" dir="rtl" style={{
+          maxWidth: isReceiptMode ? 220 : 780,
+          margin: "0 auto",
+          background: "#fff",
+          padding: isReceiptMode ? "12px 10px" : "26px 30px",
+          borderRadius: isReceiptMode ? 2 : 6,
+          boxShadow: isReceiptMode ? "none" : "0 8px 30px rgba(0,0,0,.35)",
+          fontFamily: "'Tajawal',sans-serif",
+          color: "#1a1a18",
+          fontSize: isReceiptMode ? "11px" : "16px"
+        }}>
           {/* الترويسة */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `2.5px solid ${D.gold}`, paddingBottom: 12, marginBottom: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-              {s.logo ? <img src={s.logo} alt="" style={{ width: 54, height: 54, borderRadius: 12, objectFit: "cover" }} /> : <Crest size={54} />}
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 900, color: D.grn }}>{s.clubName || "نادي النخيل"}</div>
-                <div style={{ fontSize: 10.5, color: D.mt, marginTop: 2 }}>{s.clubSub || "النادي الرياضي الترفيهي"}</div>
+          <div style={{
+            display: isReceiptMode ? "flex" : "flex",
+            flexDirection: isReceiptMode ? "column" : "row",
+            alignItems: "center",
+            justifyContent: isReceiptMode ? "center" : "space-between",
+            borderBottom: `${isReceiptMode ? 1.5 : 2.5}px solid ${D.gold}`,
+            paddingBottom: isReceiptMode ? 6 : 12,
+            marginBottom: isReceiptMode ? 6 : 14,
+            gap: isReceiptMode ? 4 : 11
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: isReceiptMode ? 6 : 11, flexDirection: isReceiptMode ? "column" : "row" }}>
+              {s.logo ? <img src={s.logo} alt="" style={{ width: isReceiptMode ? 32 : 54, height: isReceiptMode ? 32 : 54, borderRadius: 12, objectFit: "cover" }} /> : <Crest size={isReceiptMode ? 32 : 54} />}
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: isReceiptMode ? 13 : 18, fontWeight: 900, color: D.grn }}>{s.clubName || "نادي النخيل"}</div>
+                {!isReceiptMode && <div style={{ fontSize: 10.5, color: D.mt, marginTop: 2 }}>{s.clubSub || "النادي الرياضي الترفيهي"}</div>}
               </div>
             </div>
-            <div style={{ textAlign: "left", fontSize: 10.5, color: D.mt, lineHeight: 1.8 }}>
+            {!isReceiptMode && <div style={{ textAlign: "left", fontSize: 10.5, color: D.mt, lineHeight: 1.8 }}>
               {s.address || "مصراتة، ليبيا"}<br />هاتف: {s.phone || ""}<br />التاريخ: {new Date().toLocaleDateString("ar-LY")}
-            </div>
+            </div>}
           </div>
 
-          <div style={{ textAlign: "center", margin: "4px 0 12px" }}>
-            <span style={{ fontSize: 16, fontWeight: 700, color: D.grn, borderBottom: `1.5px dashed ${D.gold}`, paddingBottom: 3 }}>{cfg.title}</span>
+          <div style={{ textAlign: "center", margin: isReceiptMode ? "3px 0 6px" : "4px 0 12px" }}>
+            <span style={{ fontSize: isReceiptMode ? 12 : 16, fontWeight: 700, color: D.grn, borderBottom: `1.5px dashed ${D.gold}`, paddingBottom: 3 }}>{cfg.title}</span>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, background: D.crm, border: "0.5px solid rgba(201,168,76,.35)", borderRadius: 10, padding: "9px 13px", marginBottom: 12, fontSize: 11.5 }}>
+          {!isReceiptMode && <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, background: D.crm, border: "0.5px solid rgba(201,168,76,.35)", borderRadius: 10, padding: "9px 13px", marginBottom: 12, fontSize: 11.5 }}>
             <span>{cfg.recipientLabel || "إلى"}: <b style={{ color: D.grn }}>{cfg.recipientName || "—"}</b></span>
             {cfg.recipientPhone && <span>الهاتف: <b style={{ color: D.grn }}>{cfg.recipientPhone}</b></span>}
             <span>رقم المستند: <b style={{ color: D.grn }}>{docNo}</b></span>
-          </div>
+          </div>}
+          {isReceiptMode && <div style={{ textAlign: "center", fontSize: 9, marginBottom: 6, color: D.mt }}>
+            {cfg.recipientName && <div>👤 {cfg.recipientName}</div>}
+            <div>رقم: {docNo}</div>
+          </div>}
 
           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12 }}>
             <thead><tr>{cfg.columns.map((c, i) => <th key={i} style={th}>{c}</th>)}</tr></thead>
@@ -123,12 +159,12 @@ export function PdfPreview({ doc, onClose }) {
           </table>
 
           {cfg.totals && cfg.totals.length > 0 && (
-            <div style={{ display: "flex", marginBottom: 12 }}>
-              <div style={{ minWidth: 250, border: "1px solid rgba(201,168,76,.5)", borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ display: "flex", marginBottom: isReceiptMode ? 6 : 12 }}>
+              <div style={{ minWidth: isReceiptMode ? 140 : 250, border: "1px solid rgba(201,168,76,.5)", borderRadius: isReceiptMode ? 4 : 10, overflow: "hidden" }}>
                 {cfg.totals.map((t, i) => {
                   const last = i === cfg.totals.length - 1;
                   return (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 13px", fontSize: last ? 13 : 12, borderBottom: last ? "none" : "0.5px solid rgba(201,168,76,.25)", background: last ? D.grn : "transparent", color: last ? D.gld : "#1a1a18", fontWeight: last ? 700 : 500 }}>
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: isReceiptMode ? "4px 8px" : "7px 13px", fontSize: isReceiptMode ? 10 : (last ? 13 : 12), borderBottom: last ? "none" : "0.5px solid rgba(201,168,76,.25)", background: last ? D.grn : "transparent", color: last ? D.gld : "#1a1a18", fontWeight: last ? 700 : 500 }}>
                       <span>{t[0]}</span><span>{t[1]}</span>
                     </div>
                   );
@@ -137,14 +173,21 @@ export function PdfPreview({ doc, onClose }) {
             </div>
           )}
 
-          {cfg.note && <div style={{ background: "#fdf6e3", border: `0.5px dashed ${D.gold}`, borderRadius: 9, padding: "8px 12px", fontSize: 11, color: "#8a6a20", marginBottom: 12 }}>📌 {cfg.note}</div>}
+          {cfg.note && !isReceiptMode && <div style={{ background: "#fdf6e3", border: `0.5px dashed ${D.gold}`, borderRadius: 9, padding: "8px 12px", fontSize: 11, color: "#8a6a20", marginBottom: 12 }}>📌 {cfg.note}</div>}
 
-          <div style={{ marginTop: 24, display: "flex", justifyContent: "space-between", fontSize: 10.5, color: D.mt }}>
+          {!isReceiptMode && <div style={{ marginTop: 24, display: "flex", justifyContent: "space-between", fontSize: 10.5, color: D.mt }}>
             <div style={{ width: 150, borderTop: "1px dashed #aaa", textAlign: "center", paddingTop: 4 }}>توقيع المستلم</div>
             <div style={{ width: 150, borderTop: "1px dashed #aaa", textAlign: "center", paddingTop: 4 }}>الختم / الإدارة</div>
-          </div>
-          <div style={{ textAlign: "center", fontSize: 10, color: D.mt, borderTop: "1px solid rgba(201,168,76,.4)", paddingTop: 8, marginTop: 10 }}>
-            {s.invoiceFooter || "شكراً لتعاملكم — " + (s.clubName || "نادي النخيل")} — مستند مُولّد آلياً
+          </div>}
+          <div style={{ textAlign: "center", fontSize: isReceiptMode ? 8 : 10, color: D.mt, borderTop: isReceiptMode ? "none" : "1px solid rgba(201,168,76,.4)", paddingTop: isReceiptMode ? 4 : 8, marginTop: isReceiptMode ? 6 : 10 }}>
+            {isReceiptMode ? (
+              <div>
+                <div style={{ fontSize: 9, fontWeight: 600 }}>{new Date().toLocaleDateString("ar-LY", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</div>
+                <div style={{ marginTop: 2 }}>شكراً لتعاملكم 🙏</div>
+              </div>
+            ) : (
+              <>{s.invoiceFooter || "شكراً لتعاملكم — " + (s.clubName || "نادي النخيل")} — مستند مُولّد آلياً</>
+            )}
           </div>
         </div>
       </div>

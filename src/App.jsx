@@ -156,6 +156,11 @@ const APP_CSS = (gold, touch, anim) => `
           body.nk-printing * { visibility: hidden !important; }
           body.nk-printing .nk-pdf-sheet, body.nk-printing .nk-pdf-sheet * { visibility: visible !important; }
           body.nk-printing .nk-pdf-sheet { position: absolute !important; top: 0; right: 0; left: 0; margin: 0 !important; max-width: none !important; box-shadow: none !important; border-radius: 0 !important; }
+
+          /* طباعة 80 مم (موفّرة للورق) */
+          body.nk-receipt-print .nk-pdf-sheet { width: 80mm !important; max-width: 80mm !important; page-break-after: avoid !important; }
+          body.nk-receipt-print { page-break-before: avoid !important; page-break-after: avoid !important; }
+
           body.nk-printing-labels * { visibility: hidden !important; }
           body.nk-printing-labels .nk-label-sheet, body.nk-printing-labels .nk-label-sheet * { visibility: visible !important; }
           body.nk-printing-labels .nk-label-sheet { position: absolute !important; top: 0; right: 0; left: 0; margin: 0 !important; }
