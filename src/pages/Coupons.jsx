@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import QRCode from "qrcode.react";
 import { C } from "../constants/theme.js";
 import { PageTop, Btn, Badge, Modal, Field, Inp } from "../components/ui.jsx";
@@ -9,8 +9,21 @@ function CouponPrintTemplate({ coupon }) {
   const qrRef = useRef();
 
   const handlePrint = () => {
+    if (!qrRef.current) {
+      alert("جارٍ تحضير رمز QR... يرجى المحاولة مرة أخرى");
+      return;
+    }
     const printWindow = window.open("", "_blank");
-    const qrDataUrl = qrRef.current.querySelector("canvas").toDataURL("image/png");
+    if (!printWindow) {
+      alert("فشل فتح نافذة الطباعة. تحقق من حجب النوافذ المنبثقة");
+      return;
+    }
+    const canvas = qrRef.current.querySelector("canvas");
+    if (!canvas) {
+      alert("خطأ في توليد رمز QR");
+      return;
+    }
+    const qrDataUrl = canvas.toDataURL("image/png");
 
     const html = `
       <!DOCTYPE html>
@@ -106,13 +119,18 @@ function CouponPrintTemplate({ coupon }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
-      <div ref={qrRef} style={{ padding: 16, background: "white", borderRadius: 8 }}>
-        <QRCode
-          value={coupon.code}
-          size={120}
-          level="H"
-          includeMargin={true}
-        />
+      <div ref={qrRef} style={{ padding: 16, background: "white", borderRadius: 8 }} key={coupon.id}>
+        {coupon?.code ? (
+          <QRCode
+            value={coupon.code}
+            size={120}
+            level="H"
+            includeMargin={true}
+            quietZone={10}
+          />
+        ) : (
+          <div style={{ fontSize: 12, color: "red" }}>خطأ: لا يوجد كود كوبون</div>
+        )}
       </div>
       <Btn gold onClick={handlePrint} style={{ width: "100%", justifyContent: "center" }}>
         🖨️ طباعة على 80 مم
@@ -154,7 +172,8 @@ export default function Coupons({ ctx }) {
   };
 
   const recordPrint = () => {
-    if (printModal) {
+    if (!printModal || printModal === "history") return;
+    try {
       const record = {
         couponCode: printModal.code,
         couponId: printModal.id,
@@ -164,8 +183,11 @@ export default function Coupons({ ctx }) {
       const newHistory = [record, ...printHistory];
       setPrintHistory(newHistory);
       localStorage.setItem("coupon_print_history", JSON.stringify(newHistory));
-      showToast("تم تسجيل طباعة الكوبون");
+      showToast("✓ تم تسجيل طباعة الكوبون");
       setPrintModal(null);
+    } catch (e) {
+      showToast("❌ حدث خطأ في تسجيل الطباعة");
+      console.error(e);
     }
   };
   return (
