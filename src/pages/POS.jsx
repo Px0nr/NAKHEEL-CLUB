@@ -14,7 +14,7 @@ const posUnitBtn = (primary) => ({ flex: 1, padding: ".28rem .3rem", borderRadiu
 const Row = ({ label, val, color }) => <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: color || C.k2, marginBottom: ".4rem" }}><span>{label}</span><span>{val}</span></div>;
 
 /* ============================ POS ============================ */
-export default function POS({ ctx, can }) {
+export default function POS({ ctx, can, go }) {
   const { products, setProducts, invoices, setInvoices, coupons, customers, setCustomers, employees, promotions, user, showToast, settings, parkedSales, setParkedSales } = ctx;
   const cur = settings?.currency || "د.ل";
   const [cart, setCart] = useState({});
@@ -233,6 +233,20 @@ export default function POS({ ctx, can }) {
     setCart({}); setDiscPct(0); setCoupon(""); setDeferCustomer(null); setDueDate(""); setPointsCustomer(null); setRedeemPoints(false); setDeferEmployee(null); setCashReceived("");
   };
 
+  // مرجع دائم التحديث لأحدث checkout — نفس سبب addByCodeRef أعلاه: المستمع العالمي
+  // يُثبَّت مرة واحدة فقط فلا يرى تحديثات cart/pay اللاحقة إلا عبر هذا المرجع
+  const checkoutRef = useRef(checkout);
+  checkoutRef.current = checkout;
+  // اختصار Ctrl+Enter لإتمام البيع من أي مكان في الشاشة — لا يتعارض مع Enter الخاص
+  // بقارئ الباركود (يتجاهل الأحداث المصحوبة بـ ctrlKey أصلاً) ولا بحقول الإدخال العادية
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); checkoutRef.current(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // تراجع عن آخر عملية بيع فقط (أحدث فاتورة) — يعكس خصم المخزون ودَين الزبون الآجل ونقاط الولاء ثم يحذف الفاتورة
   const undoLastSale = async () => {
     if (!lastSale) return;
@@ -340,7 +354,17 @@ export default function POS({ ctx, can }) {
             </div>
           )}
 
-          {shown.length === 0 && (
+          {/* حالتا فراغ مختلفتان قصداً: نظام بلا أي منتجات بعد يحتاج توجيهاً فعلياً (زر مباشر
+              لصفحة المنتجات)، لا نفس رسالة "لا نتائج للبحث" التي تبدو كأن النظام لا يعمل */}
+          {shown.length === 0 && products.length === 0 && (
+            <div style={{ textAlign: "center", padding: "2.2rem 1rem", color: C.mt, fontSize: 12.5, background: C.cd, borderRadius: 11, border: `0.5px dashed ${C.bc}` }}>
+              <div style={{ fontSize: 26, marginBottom: 8 }}>📦</div>
+              <div style={{ fontWeight: 600, color: C.ink, marginBottom: 4 }}>لا توجد منتجات في النظام بعد</div>
+              <div style={{ marginBottom: 12 }}>أضِف أول منتج من صفحة المنتجات لتظهر هنا جاهزة للبيع</div>
+              {go && <Btn sm onClick={() => go("products")}>+ إضافة منتج</Btn>}
+            </div>
+          )}
+          {shown.length === 0 && products.length > 0 && (
             <div style={{ textAlign: "center", padding: "2rem 1rem", color: C.mt, fontSize: 12.5, background: C.cd, borderRadius: 11, border: `0.5px dashed ${C.bc}` }}>لا توجد أصناف مطابقة{search ? ` لـ«${search}»` : ""}.</div>
           )}
           {mode === "grid" && (
@@ -527,7 +551,10 @@ export default function POS({ ctx, can }) {
                   استخدام {Math.floor((custForPoints.points || 0) / 100) * 100} نقطة = خصم {fmt(Math.floor((custForPoints.points || 0) / 100) * (settings.pointsRedeemValue || 0))} {cur}
                 </label>
               )}
-              <button onClick={checkout} disabled={cashInsufficient} style={{ width: "100%", marginTop: ".9rem", padding: ".65rem", fontSize: 14, fontWeight: 700, borderRadius: 10, cursor: cashInsufficient ? "not-allowed" : "pointer", border: "none", background: cashInsufficient ? C.mt : "linear-gradient(135deg," + C.gold + "," + C.gdd + ")", color: "#fff", fontFamily: "inherit", opacity: cashInsufficient ? .6 : 1 }}>✓ إتمام البيع</button>
+              <button onClick={checkout} disabled={cashInsufficient} title="اختصار: Ctrl+Enter" style={{ width: "100%", marginTop: ".9rem", padding: ".65rem", fontSize: 14, fontWeight: 700, borderRadius: 10, cursor: cashInsufficient ? "not-allowed" : "pointer", border: "none", background: cashInsufficient ? C.mt : "linear-gradient(135deg," + C.gold + "," + C.gdd + ")", color: "#fff", fontFamily: "inherit", opacity: cashInsufficient ? .6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                ✓ إتمام البيع
+                <span style={{ fontSize: 10, fontWeight: 600, opacity: .75, background: "rgba(255,255,255,.2)", borderRadius: 5, padding: "1px 6px" }}>Ctrl+Enter</span>
+              </button>
             </div>
           )}
         </Card>

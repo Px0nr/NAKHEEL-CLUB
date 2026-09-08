@@ -654,7 +654,7 @@ function NakheelApp() {
         <ErrorBoundary resetKey={page} onReset={() => setPage("dashboard")}>
         <Suspense fallback={<div style={{ textAlign: "center", padding: "3rem 0", color: C.mt, fontSize: 13 }}>⏳ جارٍ التحميل...</div>}>
         {page === "dashboard" && <Dashboard ctx={ctx} go={setPage} />}
-        {page === "pos" && <POS ctx={ctx} can={can} />}
+        {page === "pos" && <POS ctx={ctx} can={can} go={setPage} />}
         {page === "sales" && <Sales ctx={ctx} can={can} />}
         {page === "purchases" && <Purchases ctx={ctx} />}
         {page === "products" && <Products ctx={ctx} can={can} />}
@@ -686,7 +686,10 @@ function NakheelApp() {
       {toast && (() => {
         const t = typeof toast === "string" ? { msg: toast } : toast;
         return (
-          <div style={{ position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", background: C.grn, color: "#fff", borderRadius: 12, fontSize: T.font.base, fontWeight: 600, zIndex: 600, boxShadow: "0 8px 24px rgba(0,0,0,.25)", overflow: "hidden", animation: settings.animations ? "nkPop .3s ease" : "none" }}>
+          // role="status" + aria-live="polite": كل رسالة توست (نجاح فاتورة، خطأ حفظ...) في كل
+          // صفحات النظام تمر عبر showToast — هذا التغيير الوحيد يجعلها كلها مسموعة لقارئ الشاشة
+          // دفعة واحدة دون لمس عشرات مواضع الاستدعاء
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", background: C.grn, color: "#fff", borderRadius: 12, fontSize: T.font.base, fontWeight: 600, zIndex: 600, boxShadow: "0 8px 24px rgba(0,0,0,.25)", overflow: "hidden", animation: settings.animations ? "nkPop .3s ease" : "none" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: ".85rem 1.4rem" }}>
               <span>✓ {t.msg}</span>
               {t.onUndo && (
