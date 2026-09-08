@@ -4,22 +4,29 @@ import { TYPE_NAME, TYPE_ICON, ASSET_STATUS } from "../constants/seeds.js";
 import { PageTop, Field, Sel, Inp, Btn, Table, Crest } from "../components/ui.jsx";
 import { RankBarChart } from "../components/charts.jsx";
 import { pctDelta } from "../utils/analytics.js";
-import { todayISO, arDate } from "../utils/format.js";
+import { todayISO, arDate, daysBetween } from "../utils/format.js";
 import { parseBookingMinutes } from "../utils/bookings.js";
+
+// زبون بلا حركة شراء لهذه المدة أو أكثر (رغم كونه مسجّلاً بفواتير سابقة) يُعتبر خاملاً —
+// نفس عتبة الثلاثين يوماً المعتمدة في المخزون الراكد (Insights.jsx) لتناسق المفهوم عبر النظام
+const CUSTOMER_INACTIVITY_DAYS = 30;
 
 /* ============================ REPORTS ============================ */
 export default function Reports({ ctx }) {
-  const { invoices, purchases, expenses, products, totals, assets, waste, cats, rentals, reportPresets, setReportPresets, showToast } = ctx;
+  const { invoices, purchases, expenses, products, totals, assets, waste, cats, rentals, customers, reportPresets, setReportPresets, showToast } = ctx;
   const [type, setType] = useState("sales");
   const [cat, setCat] = useState("");       // فلتر القسم (منتجات / تتبع مبيعات قسم)
   const [source, setSource] = useState(""); // فلتر المصدر لتقرير المبيعات العام
   const [resType, setResType] = useState(""); // فلتر نوع الجهاز/الطاولة لتقرير الحجوزات
+  const [tierFilter, setTierFilter] = useState(""); // فلتر فئة الزبون لتقرير الزبائن
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presetName, setPresetName] = useState("");
   const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]; });
   const [to, setTo] = useState(todayISO());
   const printRef = useRef(null);
-  const rangeless = type === "assets" || type === "products";
+  // تقرير الزبائن لقطة لحالة النظام الآن (دَين حالي، آخر زيارة إجمالية) لا حركة ضمن فترة —
+  // نفس منطق "products" و"assets" أدناه، فلا يُقيَّد بنطاق تاريخ
+  const rangeless = type === "assets" || type === "products" || type === "customers";
 
   // بنّاء التقرير كدالة نقية على نطاق زمني — تُستدعى مرتين (الفترة الحالية وفترة مقارنة مساوية الطول قبلها مباشرة)
   // لإتاحة مقارنة الفترتين دون تكرار منطق كل تقرير من الأربعة عشر
@@ -238,6 +245,42 @@ export default function Reports({ ctx }) {
         chart: tables.length ? { data: tables.slice(0, 8).map(([label, value]) => ({ label, value })), color: "#2a78d6" } : null };
     }
 
+    if (type === "customers") {
+      // لقطة حالة حالية (لا فلترة تاريخ — الدَين ونقاط الولاء وآخر زيارة قيم لحظية على العميل، لا حركة ضمن فترة)
+      const today = todayISO();
+      const rows = customers
+        .filter(c => !tierFilter || c.tier === tierFilter)
+        .map(c => ({ ...c, daysSince: c.last ? daysBetween(c.last, today) : null }))
+        .sort((a, b) => (b.total || 0) - (a.total || 0));
+      const totalDebt = rows.reduce((s, c) => s + (c.debt || 0), 0);
+      const debtors = rows.filter(c => (c.debt || 0) > 0);
+      const top = rows[0];
+      // خمول الزبائن: نفس مفهوم "المخزون الراكد" (Insights.jsx) مُطبَّقاً على الزبائن —
+      // زبون له تاريخ زيارة سابق لكن مضى عليه أكثر من العتبة بلا شراء جديد
+      const inactive = rows
+        .filter(c => c.daysSince !== null && c.daysSince >= CUSTOMER_INACTIVITY_DAYS)
+        .sort((a, b) => b.daysSince - a.daysSince);
+      return { title: "تقرير الزبائن", headline: totalDebt,
+        summary: [
+          ["عدد الزبائن", rows.length],
+          ["إجمالي الديون المستحقة", fmt(totalDebt) + " " + cur],
+          ["زبائن مدينون", debtors.length],
+          ["الأكثر إنفاقاً", top ? top.name : "—"],
+        ],
+        thead: ["الترتيب", "الزبون", "الفئة", "الهاتف", "عدد الفواتير", "إجمالي المشتريات", "الدَين الحالي", "نقاط الولاء", "آخر زيارة"],
+        tbody: rows.length ? rows.map((c, i) => [
+          i + 1, c.name, c.tier || "—", c.phone || "—", c.invoices || 0,
+          fmt(c.total || 0) + " " + cur,
+          c.debt ? fmt(c.debt) + " " + cur : "—",
+          c.points || 0,
+          c.last ? arDate(c.last) : "—",
+        ]) : [["لا زبائن مسجَّلون بعد", "", "", "", "", "", "", "", ""]],
+        thead2: ["الزبون", "أيام بلا زيارة", "آخر زيارة", "إجمالي مشترياته"],
+        tbody2: inactive.map(c => [c.name, c.daysSince, arDate(c.last), fmt(c.total || 0) + " " + cur]),
+        title2: `⏳ زبائن خاملون (بلا زيارة ${CUSTOMER_INACTIVITY_DAYS}+ يوماً)`,
+        chart: rows.length ? { data: rows.slice(0, 8).map(c => ({ label: c.name, value: c.total || 0 })), color: C.grl } : null };
+    }
+
     // products — قائمة المنتجات مع لمحة عن إيراد الأقسام (حالة حالية، بلا فلترة تاريخ)
     const rows = products.filter(p => !cat || p.cat === cat);
     const catRevenue = {};
@@ -250,7 +293,7 @@ export default function Reports({ ctx }) {
       chart: Object.keys(countByCat).length > 1 ? { data: Object.entries(countByCat).map(([k, value]) => ({ label: cats[k] || k, value })), color: C.gold } : null };
   };
 
-  const depsBase = [type, cat, source, resType, invoices, purchases, expenses, products, totals, assets, waste, cats, rentals, ctx.suppliers.length];
+  const depsBase = [type, cat, source, resType, tierFilter, invoices, purchases, expenses, products, totals, assets, waste, cats, rentals, customers, ctx.suppliers.length];
   // buildReport is a fresh closure every render by design (it captures the deps above directly) —
   // listing it here would defeat the memoization it exists for, so its own identity is intentionally excluded.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -349,7 +392,7 @@ export default function Reports({ ctx }) {
     table{width:100%;border-collapse:collapse;margin-top:.5rem}th{background:#1a5c2e;color:#f0d080;padding:.45rem .6rem;text-align:right;font-size:11px}td{padding:.45rem .6rem;border-bottom:0.5px solid #e8e4d8;font-size:12px}tr:nth-child(even) td{background:#faf8f2}
     .ft{text-align:center;font-size:10px;color:#7a7870;margin-top:1.5rem;padding-top:.75rem;border-top:0.5px solid #c9a84c}</style></head><body>
     <div class="hd"><div><div class="nm">🌴 نادي النخيل</div><div class="sub">النادي الرياضي الترفيهي</div></div><div class="info">مصراتة، ليبيا<br>تاريخ الطباعة: ${new Date().toLocaleDateString("ar-LY")}</div></div>
-    <h3>${cfg.title}${cat && (type === "products") ? " — قسم " + (cats[cat] || cat) : ""}</h3>${rangeless ? "" : `<p class="range">الفترة: ${arDate(from)} — ${arDate(to)}</p>`}
+    <h3>${cfg.title}${cat && (type === "products") ? " — قسم " + (cats[cat] || cat) : ""}${tierFilter && type === "customers" ? " — فئة " + tierFilter : ""}</h3>${rangeless ? "" : `<p class="range">الفترة: ${arDate(from)} — ${arDate(to)}</p>`}
     <div class="sum">${cfg.summary.map(s => `<div class="sc"><div class="sv">${s[1]}</div><div class="sl">${s[0]}</div></div>`).join("")}</div>
     ${cfg.note ? `<p style="background:#FFF7EB;border:0.5px dashed #c9a84c;border-radius:8px;padding:8px 12px;font-size:11px;color:#8a6a20;margin:10px 0">📌 ${cfg.note}</p>` : ""}
     <table><thead><tr>${cfg.thead.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${cfg.tbody.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>
@@ -379,11 +422,13 @@ export default function Reports({ ctx }) {
             <option value="rentals">تأجير الأجهزة</option>
             <option value="deptProfit">صافي ربح الأقسام</option>
             <option value="assets">موارد النادي</option>
+            <option value="customers">تقرير الزبائن</option>
           </Sel>
         </Field>
         {type === "sales" && <Field label="المصدر"><Sel value={source} onChange={e => setSource(e.target.value)} style={{ minWidth: 130 }}><option value="">كل المصادر</option><option value="منتج">مبيعات منتجات</option><option value="حجز">حجوزات</option><option value="تأجير">تأجير أجهزة</option><option value="رصيد سابق">أرصدة سابقة</option></Sel></Field>}
         {(type === "products" || type === "catSales") && <Field label="القسم"><Sel value={cat} onChange={e => setCat(e.target.value)} style={{ minWidth: 140 }}>{type === "products" && <option value="">كل الأقسام</option>}{Object.entries(cats).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Sel></Field>}
         {type === "bookingRev" && <Field label="النوع"><Sel value={resType} onChange={e => setResType(e.target.value)} style={{ minWidth: 140 }}><option value="">كل الأنواع</option>{Object.entries(TYPE_NAME).map(([k, l]) => <option key={k} value={k}>{TYPE_ICON[k]} {l}</option>)}</Sel></Field>}
+        {type === "customers" && <Field label="الفئة"><Sel value={tierFilter} onChange={e => setTierFilter(e.target.value)} style={{ minWidth: 140 }}><option value="">كل الفئات</option>{[...new Set(customers.map(c => c.tier).filter(Boolean))].map(t => <option key={t} value={t}>{t}</option>)}</Sel></Field>}
         {!rangeless && <>
           <Field label="من تاريخ"><Inp type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field>
           <Field label="إلى تاريخ"><Inp type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
@@ -409,7 +454,7 @@ export default function Reports({ ctx }) {
           <div style={{ textAlign: "left", fontSize: 11, color: C.mt }}>مصراتة، ليبيا<br />{new Date().toLocaleDateString("ar-LY")}</div>
         </div>
         <div style={{ textAlign: "center", marginBottom: "1rem" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.grn2 }}>{cfg.title}{cat && type === "products" ? " — قسم " + (cats[cat] || cat) : ""}</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.grn2 }}>{cfg.title}{cat && type === "products" ? " — قسم " + (cats[cat] || cat) : ""}{tierFilter && type === "customers" ? " — فئة " + tierFilter : ""}</h3>
           {!rangeless && <p style={{ fontSize: 11, color: C.mt, marginTop: 2 }}>الفترة: {arDate(from)} — {arDate(to)}{headlineDelta != null && (
             <span style={{ marginRight: 8, fontWeight: 700, color: headlineDelta >= 0 ? "#1a8c3e" : C.red }}>{headlineDelta >= 0 ? "▲" : "▼"} {Math.abs(headlineDelta)}% عن فترة مقارنة مساوية الطول ({arDate(prevFrom)} — {arDate(prevTo)})</span>
           )}</p>}
