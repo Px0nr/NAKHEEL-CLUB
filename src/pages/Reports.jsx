@@ -3,7 +3,7 @@ import { C, fmt } from "../constants/theme.js";
 import { TYPE_NAME, TYPE_ICON, ASSET_STATUS } from "../constants/seeds.js";
 import { PageTop, Field, Sel, Inp, Btn, Table, Crest } from "../components/ui.jsx";
 import { RankBarChart, TrendChart } from "../components/charts.jsx";
-import { pctDelta } from "../utils/analytics.js";
+import { pctDelta, rangePreset } from "../utils/analytics.js";
 import { todayISO, arDate, daysBetween } from "../utils/format.js";
 import { parseBookingMinutes } from "../utils/bookings.js";
 
@@ -20,6 +20,21 @@ const dailySeries = (rFrom, rTo, valueForDate) => {
 // زبون بلا حركة شراء لهذه المدة أو أكثر (رغم كونه مسجّلاً بفواتير سابقة) يُعتبر خاملاً —
 // نفس عتبة الثلاثين يوماً المعتمدة في المخزون الراكد (Insights.jsx) لتناسق المفهوم عبر النظام
 const CUSTOMER_INACTIVITY_DAYS = 30;
+
+// نطاقات سريعة تُطبَّق على from/to بضغطة واحدة بدل اختيار تاريخين يدوياً في كل مرة —
+// rangePreset() نفسها المستخدمة أصلاً في Insights.jsx، هنا فقط قائمة أوسع تناسب
+// تقارير الإغلاق المحاسبي (الشهر الماضي، الربع الماضي، السنة الماضية) التي لا يحتاجها Insights
+const QUICK_RANGES = [
+  ["today", "اليوم"],
+  ["last7", "آخر 7 أيام"],
+  ["last30", "آخر 30 يوماً"],
+  ["thisMonth", "هذا الشهر"],
+  ["lastMonth", "الشهر الماضي"],
+  ["thisQuarter", "هذا الربع"],
+  ["lastQuarter", "الربع الماضي"],
+  ["thisYear", "هذه السنة"],
+  ["lastYear", "السنة الماضية"],
+];
 
 /* ============================ REPORTS ============================ */
 export default function Reports({ ctx }) {
@@ -445,6 +460,12 @@ export default function Reports({ ctx }) {
         {type === "bookingRev" && <Field label="النوع"><Sel value={resType} onChange={e => setResType(e.target.value)} style={{ minWidth: 140 }}><option value="">كل الأنواع</option>{Object.entries(TYPE_NAME).map(([k, l]) => <option key={k} value={k}>{TYPE_ICON[k]} {l}</option>)}</Sel></Field>}
         {type === "customers" && <Field label="الفئة"><Sel value={tierFilter} onChange={e => setTierFilter(e.target.value)} style={{ minWidth: 140 }}><option value="">كل الفئات</option>{[...new Set(customers.map(c => c.tier).filter(Boolean))].map(t => <option key={t} value={t}>{t}</option>)}</Sel></Field>}
         {!rangeless && <>
+          <Field label="نطاق سريع">
+            <Sel value="" onChange={e => { if (!e.target.value) return; const r = rangePreset(e.target.value); setFrom(r.from); setTo(r.to); }} style={{ minWidth: 130 }}>
+              <option value="">— اختر —</option>
+              {QUICK_RANGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </Sel>
+          </Field>
           <Field label="من تاريخ"><Inp type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field>
           <Field label="إلى تاريخ"><Inp type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
         </>}

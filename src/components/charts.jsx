@@ -298,7 +298,9 @@ export function TrendChart({ curSeries, prevSeries, colorA, colorB, cur }) {
   const allVals = [...curSeries, ...prevSeries].filter(v => v != null);
   const max = Math.max(1, ...allVals);
   const n = Math.max(curSeries.length, prevSeries.length);
-  const x = (i) => pad + (i / (n - 1)) * (W - pad * 2);
+  // نطاق يوم واحد (n=1): القسمة على (n-1) تُنتج NaN فتُكسر رسم المسار بالكامل —
+  // نقطة وحيدة تُوضع في المنتصف بدل ذلك
+  const x = (i) => n <= 1 ? W / 2 : pad + (i / (n - 1)) * (W - pad * 2);
   const y = (v) => H - pad - (v / max) * (H - pad * 2 - 10);
 
   const pathFor = (series, close) => {
