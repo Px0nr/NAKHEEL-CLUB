@@ -125,6 +125,10 @@ const APP_CSS = (gold, touch, anim) => `
         button, a { transition: ${anim ? "transform .1s ease, background .15s, box-shadow .15s" : "none"}; }
         input:focus, select:focus, textarea:focus { border-color: ${gold} !important; box-shadow: 0 0 0 3px ${gold}22 !important; }
         button:focus-visible, [role="button"]:focus-visible, .nk-nav-item:focus-visible { outline: 2px solid ${gold}; outline-offset: 2px; }
+        /* شبكة أمان عامة: أي عنصر قابل للتركيز لم يُغطَّ أعلاه (روابط، عناصر
+           مخصّصة بـ tabIndex) يحصل على مؤشّر تركيز مرئي بدل الاختفاء الصامت —
+           لا يظهر إلا مع لوحة المفاتيح (focus-visible) فلا يُزعج مستخدم الفأرة */
+        a:focus-visible, [tabindex]:focus-visible { outline: 2px solid ${gold}; outline-offset: 2px; border-radius: 4px; }
         tbody tr { transition: background .12s; }
         tbody tr:hover td { background: ${gold}0d; }
         ::selection { background: ${gold}55; }

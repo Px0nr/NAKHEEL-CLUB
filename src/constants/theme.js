@@ -58,6 +58,38 @@ export function resolveTheme(settings) {
   };
 }
 
+// خرائط أسماء C المختصرة إلى متغيرات CSS بأسماء مقروءة — تُصدَّر أيضاً كي يقرأها
+// أي CSS خارجي (app.css) دون معرفة اختصارات C الداخلية
+export const CSS_VAR_MAP = {
+  gold: "--nk-accent", gld: "--nk-accent-light", gdd: "--nk-accent-dark",
+  grn: "--nk-brand", grn2: "--nk-brand-2", grl: "--nk-brand-accent",
+  crm: "--nk-surface-soft", ink: "--nk-ink", k2: "--nk-ink-2", mt: "--nk-ink-muted",
+  bc: "--nk-border", cd: "--nk-surface", pg: "--nk-bg",
+  red: "--nk-red", redbg: "--nk-red-bg", blue: "--nk-blue", bluebg: "--nk-blue-bg",
+  purp: "--nk-purple", purpbg: "--nk-purple-bg",
+};
+
+// آخر ثيم مُطبَّق فعلياً — لتفادي كتابة نفس متغيرات CSS على كل رندر (applyTheme
+// يُستدعى من App.jsx مرتين في كل تحديث حالة، لا فقط عند تغيّر الثيم)
+let _lastAppliedKey = null;
+
 export function applyTheme(settings) {
-  Object.assign(C, resolveTheme(settings));
+  const resolved = resolveTheme(settings);
+  Object.assign(C, resolved);
+
+  // مزامنة متغيرات CSS مع الجذر: تتيح لأي ملف CSS عادي (لا فقط style المضمّن في
+  // JS) أن يتبع الثيم النشط تلقائياً — أساس ضروري لأي انتقال بعيداً عن الأنماط
+  // المضمّنة المكرَّرة في كل صفحة
+  const key = `${settings.theme || "gold"}|${settings.dark ? 1 : 0}|${settings.customBg || ""}`;
+  if (key === _lastAppliedKey) return;
+  _lastAppliedKey = key;
+
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  Object.entries(CSS_VAR_MAP).forEach(([shortKey, cssVar]) => {
+    root.style.setProperty(cssVar, resolved[shortKey]);
+  });
+  root.dataset.theme = resolved.dark ? "dark" : "light";
+  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta) themeColorMeta.setAttribute("content", resolved.grn);
 }
