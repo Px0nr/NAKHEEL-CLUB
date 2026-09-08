@@ -2,10 +2,20 @@ import { useState, useMemo, useRef } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { TYPE_NAME, TYPE_ICON, ASSET_STATUS } from "../constants/seeds.js";
 import { PageTop, Field, Sel, Inp, Btn, Table, Crest } from "../components/ui.jsx";
-import { RankBarChart } from "../components/charts.jsx";
+import { RankBarChart, TrendChart } from "../components/charts.jsx";
 import { pctDelta } from "../utils/analytics.js";
 import { todayISO, arDate, daysBetween } from "../utils/format.js";
 import { parseBookingMinutes } from "../utils/bookings.js";
+
+// يبني مصفوفة يوماً بيوم عبر [rFrom, rTo] (أيام بلا حركة تُملأ صفراً) — أساس أي
+// رسم اتجاه زمني (TrendChart)، ويُستخدَم لأكثر من نوع تقرير فتفادينا تكراره
+const dailySeries = (rFrom, rTo, valueForDate) => {
+  const days = daysBetween(rFrom, rTo) + 1;
+  return Array.from({ length: days }, (_, i) => {
+    const iso = new Date(new Date(rFrom + "T00:00:00Z").getTime() + i * 86400000).toISOString().slice(0, 10);
+    return valueForDate(iso) || 0;
+  });
+};
 
 // زبون بلا حركة شراء لهذه المدة أو أكثر (رغم كونه مسجّلاً بفواتير سابقة) يُعتبر خاملاً —
 // نفس عتبة الثلاثين يوماً المعتمدة في المخزون الراكد (Insights.jsx) لتناسق المفهوم عبر النظام
@@ -39,8 +49,11 @@ export default function Reports({ ctx }) {
       const paid = rows.filter(i => i.status === "مدفوعة");
       const rev = paid.reduce((s, i) => s + i.total, 0);
       const avg = paid.length ? Math.round(rev / paid.length) : 0;
+      const revByDate = {};
+      paid.forEach(i => { revByDate[i.date] = (revByDate[i.date] || 0) + i.total; });
       return { title: "تقرير المبيعات", headline: rev, summary: [["إجمالي المبيعات", fmt(rev) + " " + cur], ["عدد الفواتير", rows.length], ["متوسط الفاتورة", fmt(avg) + " " + cur]],
-        thead: ["رقم", "الزبون", "المصدر", "التفاصيل", "الدفع", "الإجمالي"], tbody: rows.map(i => ["#" + i.id, i.customer, i.source, i.details, i.paidVia ? `آجل ← ${i.paidVia}` : i.pay, fmt(i.total) + " " + cur]) };
+        thead: ["رقم", "الزبون", "المصدر", "التفاصيل", "الدفع", "الإجمالي"], tbody: rows.map(i => ["#" + i.id, i.customer, i.source, i.details, i.paidVia ? `آجل ← ${i.paidVia}` : i.pay, fmt(i.total) + " " + cur]),
+        series: dailySeries(rFrom, rTo, (iso) => revByDate[iso]) };
     }
 
     if (type === "purchases") {
@@ -223,7 +236,8 @@ export default function Reports({ ctx }) {
         summary: [["إجمالي مبيعات القسم", fmt(totalRev) + " " + cur], ["أيام نشطة", days.length], ["متوسط يومي", fmt(Math.round(avgDaily)) + " " + cur], ["الأكثر مبيعاً", topProducts.length ? topProducts[0][0] : "—"]],
         thead: ["التاريخ", "إيراد القسم"], tbody: days.length ? days.map(d => [arDate(d), fmt(dayMap[d]) + " " + cur]) : [["لا حركة مبيعات لهذا القسم ضمن الفترة المختارة", ""]],
         thead2: ["المنتج", "الإيراد"], tbody2: topProducts.map(([n, v]) => [n, fmt(v) + " " + cur]), title2: "الأكثر مبيعاً بالقسم",
-        chart: topProducts.length ? { data: topProducts.map(([label, value]) => ({ label, value })), color: C.grl } : null };
+        chart: topProducts.length ? { data: topProducts.map(([label, value]) => ({ label, value })), color: C.grl } : null,
+        series: dailySeries(rFrom, rTo, (iso) => dayMap[iso]) };
     }
 
     if (type === "bookingRev") {
@@ -242,7 +256,8 @@ export default function Reports({ ctx }) {
         summary: [["إجمالي الإيراد", fmt(totalRev) + " " + cur], ["عدد الحجوزات", cnt], ["متوسط الحجز", cnt ? fmt(Math.round(totalRev / cnt)) + " " + cur : "—"], ["الأكثر نشاطاً", tables.length ? tables[0][0] : "—"]],
         thead: ["التاريخ", "الإيراد"], tbody: days.length ? days.map(d => [arDate(d), fmt(dayMap[d]) + " " + cur]) : [["لا حجوزات ضمن الفترة المختارة", ""]],
         thead2: ["الطاولة / الجهاز", "الإيراد"], tbody2: tables.map(([n, v]) => [n, fmt(v) + " " + cur]), title2: "الإيراد حسب الطاولة/الجهاز",
-        chart: tables.length ? { data: tables.slice(0, 8).map(([label, value]) => ({ label, value })), color: "#2a78d6" } : null };
+        chart: tables.length ? { data: tables.slice(0, 8).map(([label, value]) => ({ label, value })), color: "#2a78d6" } : null,
+        series: dailySeries(rFrom, rTo, (iso) => dayMap[iso]) };
     }
 
     if (type === "customers") {
@@ -463,6 +478,12 @@ export default function Reports({ ctx }) {
           {cfg.summary.map((s, i) => <div key={i} style={{ background: C.crm, borderRadius: 8, padding: ".65rem", textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 700, color: C.grn2 }}>{s[1]}</div><div style={{ fontSize: 10, color: C.mt, marginTop: 2 }}>{s[0]}</div></div>)}
         </div>
         {cfg.note && <div style={{ background: "#FFF7EB", border: `0.5px dashed ${C.gold}`, borderRadius: 9, padding: "8px 12px", fontSize: 11, color: "#8a6a20", marginBottom: 12 }}>📌 {cfg.note}</div>}
+        {cfg.series && prevCfg?.series && (cfg.series.some(v => v > 0) || prevCfg.series.some(v => v > 0)) && (
+          <div style={{ background: C.crm, borderRadius: 10, padding: "1rem 1.1rem", marginBottom: "1.1rem" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.grn2, marginBottom: 8 }}>الاتجاه اليومي — الفترة الحالية (مساحة) مقابل فترة المقارنة (متقطّع)</div>
+            <TrendChart curSeries={cfg.series} prevSeries={prevCfg.series} colorA={C.grl} colorB={C.gold} cur={ctx.settings?.currency || "د.ل"} />
+          </div>
+        )}
         {cfg.chart && cfg.chart.data.length > 0 && (
           <div style={{ background: C.crm, borderRadius: 10, padding: "1rem 1.1rem", marginBottom: "1.1rem" }}>
             <RankBarChart data={cfg.chart.data} color={cfg.chart.color} cur={ctx.settings?.currency || "د.ل"} />

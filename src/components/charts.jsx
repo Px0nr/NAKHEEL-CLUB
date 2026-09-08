@@ -364,8 +364,8 @@ export function TrendChart({ curSeries, prevSeries, colorA, colorB, cur }) {
     if (hoverIRef.current === i) return;
     hoverIRef.current = i;
     const lines = [];
-    if (curSeries[i] != null) lines.push(`هذا الشهر: ${fmt(curSeries[i])}${cur ? " " + cur : ""}`);
-    if (prevSeries[i] != null) lines.push(`الشهر الماضي: ${fmt(prevSeries[i])}${cur ? " " + cur : ""}`);
+    if (curSeries[i] != null) lines.push(`الفترة الحالية: ${fmt(curSeries[i])}${cur ? " " + cur : ""}`);
+    if (prevSeries[i] != null) lines.push(`فترة المقارنة: ${fmt(prevSeries[i])}${cur ? " " + cur : ""}`);
     // موضع التلميح يُثبَّت على نقطة البيانات لا على المؤشر: أدقّ دلالةً، ويجعل
     // التحديث مرتبطاً بالفهرس وحده
     showAtPoint(rect.left + (x(i) / W) * rect.width, rect.top + pad, `يوم ${i + 1}\n${lines.join("\n")}`.split("\n").map((l, k) => <div key={k}>{l}</div>));
@@ -380,7 +380,7 @@ export function TrendChart({ curSeries, prevSeries, colorA, colorB, cur }) {
   return (
     <div ref={boxRef} style={{ position: "relative" }}>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: H, cursor: "crosshair" }}
-        role="img" aria-label="اتجاه الإيراد اليومي: الشهر الحالي مقابل الشهر الماضي"
+        role="img" aria-label="اتجاه الإيراد اليومي: الفترة الحالية مقابل فترة المقارنة"
         onMouseMove={onMove} onMouseLeave={onLeave}>
         {[0.25, 0.5, 0.75, 1].map((f, i) => <line key={i} x1={pad} x2={W - pad} y1={pad + f * (H - pad * 2 - 10)} y2={pad + f * (H - pad * 2 - 10)} stroke={C.bc} strokeWidth="1" />)}
         {[0.25, 0.5, 0.75, 1].map((f, i) => <text key={i} x={W - pad - 2} y={pad + f * (H - pad * 2 - 10) - 3} textAnchor="end" fontSize="9" fill={C.mt}>{fmt(Math.round(max * (1 - f)))}</text>)}
