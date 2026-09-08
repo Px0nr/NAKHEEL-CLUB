@@ -85,6 +85,40 @@ export const inputStyle = { fontSize: 12.5, border: `0.5px solid ${C.bc}`, borde
 export const Inp = (p) => <input {...p} style={{ ...inputStyle, ...(p.style || {}) }} />;
 export const Sel = (p) => <select {...p} style={{ ...inputStyle, ...(p.style || {}) }}>{p.children}</select>;
 
+const FOCUSABLE_SEL = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/* حصر التركيز داخل نافذة منبثقة — يُستخدم في Modal وConfirmDialog، وهما الأساس
+   الذي تُبنى عليه كل نافذة في أكثر من 24 صفحة، فإصلاح واحد هنا يغطيها جميعاً:
+   1) عند الفتح: التركيز ينتقل لأول عنصر تفاعلي داخل النافذة (بدل البقاء خلفها
+      في الصفحة المحجوبة، حيث تتابع لوحة المفاتيح/قارئ الشاشة العمل بصمت).
+   2) أثناء الفتح: Tab/Shift+Tab يدوران داخل عناصر النافذة فقط، فلا يهرب
+      التركيز إلى عناصر الصفحة خلف الخلفية المعتمة.
+   3) عند الإغلاق: التركيز يعود للعنصر الذي فتح النافذة أصلاً (غالباً الزر
+      الذي ضُغط) — بلا هذا يفقد مستخدم لوحة المفاتيح موضعه في الصفحة كل إغلاق. */
+export function useModalFocus(containerRef) {
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const prevActive = document.activeElement;
+    const focusables = () => Array.from(container.querySelectorAll(FOCUSABLE_SEL)).filter(el => el.offsetParent !== null);
+    (focusables()[0] || container).focus({ preventScroll: true });
+
+    const onKeyDown = (e) => {
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    container.addEventListener("keydown", onKeyDown);
+    return () => {
+      container.removeEventListener("keydown", onKeyDown);
+      if (prevActive && typeof prevActive.focus === "function") prevActive.focus({ preventScroll: true });
+    };
+  }, [containerRef]);
+}
+
 /* مدة حركة الخروج — يجب أن تطابق .nk-modal-out في App.jsx.
    لا تُقاس عبر حدث animationend لأن الحركة قد تكون معطّلة (بمفتاح الإعدادات أو
    بتفضيل تقليل الحركة) فلا يُطلَق الحدث أبداً وتبقى النافذة مفتوحة للأبد. */
@@ -93,6 +127,8 @@ const MODAL_EXIT_MS = 170;
 export function Modal({ title, onClose, children, width = 540 }) {
   const [closing, setClosing] = useState(false);
   const timerRef = useRef(null);
+  const dialogRef = useRef(null);
+  useModalFocus(dialogRef);
 
   // الإغلاق يؤجَّل ريثما تنتهي حركة الخروج، ثم يُبلَّغ الأب فيُزيل النافذة.
   // عند تعطيل الحركة يُغلق فوراً بلا تأخير مصطنع.
@@ -116,8 +152,8 @@ export function Modal({ title, onClose, children, width = 540 }) {
     <div onClick={(e) => e.target === e.currentTarget && close()}
       className={closing ? "nk-backdrop-out" : undefined}
       style={{ position: "fixed", inset: 0, background: "rgba(10,30,15,.5)", backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
-      <div className={closing ? "nk-modal-out" : "nk-modal-in"} role="dialog" aria-modal="true"
-        style={{ background: C.cd, borderRadius: 16, padding: "1.4rem 1.5rem", width, maxWidth: "96vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 60px rgba(0,0,0,.35)" }}>
+      <div ref={dialogRef} tabIndex={-1} className={closing ? "nk-modal-out" : "nk-modal-in"} role="dialog" aria-modal="true"
+        style={{ background: C.cd, borderRadius: 16, padding: "1.4rem 1.5rem", width, maxWidth: "96vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 60px rgba(0,0,0,.35)", outline: "none" }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: "1.1rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           {title}<button onClick={close} aria-label="إغلاق" style={{ cursor: "pointer", color: C.mt, fontSize: 18, background: "none", border: "none", fontFamily: "inherit" }}>✕</button>
         </div>
