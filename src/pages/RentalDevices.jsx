@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { C, fmt } from "../constants/theme.js";
-import { PageTop, Btn, KCard, Card, CardHead, Table, Badge, Modal, Field, Inp } from "../components/ui.jsx";
+import { PageTop, Btn, KCard, Card, CardHead, Table, Badge, Modal, Field, Inp, Sel } from "../components/ui.jsx";
 import { todayISO, toWa } from "../utils/format.js";
+import { customerSaleDelta, applyCustomerSale } from "../utils/customerLink.js";
+import { computeLateFee } from "../utils/rentalLateFee.js";
 
 /* ============================ RENTAL DEVICES (تأجير الأجهزة الإلكترونية) ============================ */
 export default function RentalDevices({ ctx }) {
-  const { rentalDevices, setRentalDevices, rentals, setRentals, setInvoices, user, showToast, confirm, settings } = ctx;
+  const { rentalDevices, setRentalDevices, rentals, setRentals, setInvoices, customers, setCustomers, user, showToast, confirm, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force(x => x + 1), 30000); return () => clearInterval(t); }, []); // تحديث العدّادات كل 30ث
@@ -14,7 +16,7 @@ export default function RentalDevices({ ctx }) {
   const [devForm, setDevForm] = useState({ name: "", buyPrice: "", dailyRate: "" });
   const [rentModal, setRentModal] = useState(null); // device being rented
   const nowIso = () => { const d = new Date(); d.setSeconds(0, 0); return d.toISOString().slice(0, 16); };
-  const [rentForm, setRentForm] = useState({ customer: "", phone: "", days: 1, startAt: nowIso(), pay: "كاش" });
+  const [rentForm, setRentForm] = useState({ customer: "", phone: "", customerId: null, days: 1, startAt: nowIso(), pay: "كاش" });
 
   const addDevice = () => {
     if (!devForm.name.trim()) { showToast("أدخل اسم الجهاز"); return; }
@@ -26,10 +28,17 @@ export default function RentalDevices({ ctx }) {
 
   const activeRentalOf = (deviceId) => rentals.find(r => r.deviceId === deviceId && r.status !== "مُرجَع");
 
-  const openRent = (device) => { setRentForm({ customer: "", phone: "", days: 1, startAt: nowIso(), pay: "كاش" }); setRentModal(device); };
+  const openRent = (device) => { setRentForm({ customer: "", phone: "", customerId: null, days: 1, startAt: nowIso(), pay: "كاش" }); setRentModal(device); };
+  // اختيار زبون مسجَّل يملأ الاسم والهاتف تلقائياً ويربط العملية بسجله — كانت
+  // كل عملية تأجير اسماً حرّاً منفصلاً عن سجل الزبائن، فلا ولاء ولا بيع آجل عليها
+  const pickCustomer = (id) => {
+    const c = customers.find(x => String(x.id) === String(id));
+    if (c) setRentForm(f => ({ ...f, customer: c.name, phone: c.phone || "", customerId: c.id }));
+  };
 
   const confirmRent = () => {
     if (!rentForm.customer.trim()) { showToast("أدخل اسم الزبون"); return; }
+    if (rentForm.pay === "آجل" && !rentForm.customerId) { showToast("البيع الآجل يتطلب اختيار زبون مسجَّل"); return; }
     const wa = toWa(rentForm.phone);
     if (!wa || wa.length < 10) { showToast("رقم واتساب الزبون إلزامي وبصيغة صحيحة"); return; }
     const days = Math.max(1, parseInt(rentForm.days) || 1);
@@ -38,9 +47,10 @@ export default function RentalDevices({ ctx }) {
     const endAt = new Date(startAt.getTime() + days * 86400000);
     const total = Math.round(device.dailyRate * days * 100) / 100;
     const rid = "RT-" + Date.now();
+    const deferred = rentForm.pay === "آجل";
 
     setRentals(rs => [{
-      id: rid, deviceId: device.id, deviceName: device.name, customer: rentForm.customer.trim(), phone: rentForm.phone, wa, days,
+      id: rid, deviceId: device.id, deviceName: device.name, customer: rentForm.customer.trim(), customerId: rentForm.customerId, phone: rentForm.phone, wa, days,
       startAt: startAt.toISOString(), endAt: endAt.toISOString(), dailyRate: device.dailyRate, total, status: "نشط",
       returnedAt: null, alertSent: false, by: user?.name || "—",
     }, ...rs]);
@@ -48,17 +58,29 @@ export default function RentalDevices({ ctx }) {
 
     // إنشاء فاتورة (بلا تكلفة بضاعة — التأجير ليس استهلاكاً للمخزون)
     const invNum = "INV-RT-" + ctx.nextCounter("rtInvoice");
-    setInvoices(iv => [{ id: invNum, customer: rentForm.customer.trim(), date: todayISO(), source: "تأجير", details: `تأجير ${device.name} — ${days} يوم`, items: [{ cat: "__rental", name: `تأجير ${device.name}`, qty: 1, lineTotal: total }], pay: rentForm.pay, discount: "—", total, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+    setInvoices(iv => [{ id: invNum, customer: rentForm.customer.trim(), customerId: rentForm.customerId, date: todayISO(), source: "تأجير", details: `تأجير ${device.name} — ${days} يوم`, items: [{ cat: "__rental", name: `تأجير ${device.name}`, qty: 1, lineTotal: total }], pay: deferred ? "آجل" : rentForm.pay, discount: "—", total, cost: 0, status: deferred ? "معلقة" : "مدفوعة", ...(deferred ? { dueDate: endAt.toISOString().slice(0, 10) } : {}), by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
 
-    showToast(`تم تأجير ${device.name} لـ${rentForm.customer.trim()} — ${fmt(total)} ${cur}`);
+    if (rentForm.customerId != null) {
+      applyCustomerSale(setCustomers, rentForm.customerId, customerSaleDelta({ total, deferred, settings }), { date: todayISO() });
+    }
+
+    showToast(`تم تأجير ${device.name} لـ${rentForm.customer.trim()} — ${fmt(total)} ${cur}${deferred ? " (آجل)" : ""}`);
     setRentModal(null);
   };
 
   const returnDevice = async (rental) => {
-    if (!(await confirm(`تأكيد استرجاع «${rental.deviceName}» من ${rental.customer}؟`))) return;
-    setRentals(rs => rs.map(r => r.id === rental.id ? { ...r, status: "مُرجَع", returnedAt: new Date().toISOString() } : r));
+    const nowIsoStr = new Date().toISOString();
+    const { lateDays, lateFee } = computeLateFee(rental.endAt, nowIsoStr, rental.dailyRate);
+    const lateMsg = lateFee > 0 ? `\n\nتأخّر ${lateDays} يوم عن الموعد — غرامة تأخير ${fmt(lateFee)} ${cur} ستُضاف كفاتورة منفصلة.` : "";
+    if (!(await confirm(`تأكيد استرجاع «${rental.deviceName}» من ${rental.customer}؟${lateMsg}`))) return;
+    setRentals(rs => rs.map(r => r.id === rental.id ? { ...r, status: "مُرجَع", returnedAt: nowIsoStr, lateFee: lateFee || undefined } : r));
     setRentalDevices(ds => ds.map(d => d.id === rental.deviceId ? { ...d, status: "available" } : d));
-    showToast(`تم استرجاع ${rental.deviceName}`);
+    if (lateFee > 0) {
+      const invNum = "INV-RTL-" + ctx.nextCounter("rtlInvoice");
+      setInvoices(iv => [{ id: invNum, customer: rental.customer, customerId: rental.customerId, date: todayISO(), source: "تأجير", details: `غرامة تأخير — ${rental.deviceName} (${lateDays} يوم)`, items: [{ cat: "__rental", name: `غرامة تأخير — ${rental.deviceName}`, qty: 1, lineTotal: lateFee }], pay: "كاش", discount: "—", total: lateFee, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+      if (rental.customerId != null) applyCustomerSale(setCustomers, rental.customerId, customerSaleDelta({ total: lateFee, deferred: false, settings }), { date: todayISO() });
+    }
+    showToast(lateFee > 0 ? `تم استرجاع ${rental.deviceName} — غرامة تأخير ${fmt(lateFee)} ${cur}` : `تم استرجاع ${rental.deviceName}`);
   };
 
   const sendEndReminder = (rental) => {
@@ -182,7 +204,13 @@ export default function RentalDevices({ ctx }) {
       {/* نافذة تأجير جهاز */}
       {rentModal && (
         <Modal title={`تأجير — ${rentModal.name}`} onClose={() => setRentModal(null)} width={460}>
-          <Field label="اسم الزبون *"><Inp value={rentForm.customer} onChange={e => setRentForm({ ...rentForm, customer: e.target.value })} placeholder="الاسم الكامل" /></Field>
+          <Field label="زبون مسجَّل (اختياري)">
+            <Sel value={rentForm.customerId || ""} onChange={e => e.target.value ? pickCustomer(e.target.value) : setRentForm(f => ({ ...f, customerId: null }))}>
+              <option value="">— زبون جديد / بلا ربط —</option>
+              {customers.map(c => <option key={c.id} value={c.id}>{c.name} — {c.phone}</option>)}
+            </Sel>
+          </Field>
+          <Field label="اسم الزبون *"><Inp value={rentForm.customer} onChange={e => setRentForm({ ...rentForm, customer: e.target.value, customerId: null })} placeholder="الاسم الكامل" /></Field>
           <Field label="رقم واتساب الزبون * (إلزامي)"><Inp value={rentForm.phone} onChange={e => setRentForm({ ...rentForm, phone: e.target.value })} placeholder="0913-000-000" /></Field>
           {rentForm.phone && <div style={{ fontSize: 11, color: C.mt, marginTop: -6, marginBottom: 10 }}>سيُحفظ كـ: {toWa(rentForm.phone) || "—"} — سيُستخدم لإرسال تذكير قبل انتهاء المدة</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -190,9 +218,9 @@ export default function RentalDevices({ ctx }) {
             <Field label="تاريخ ووقت الاستلام"><Inp type="datetime-local" value={rentForm.startAt} onChange={e => setRentForm({ ...rentForm, startAt: e.target.value })} /></Field>
           </div>
           <Field label="طريقة الدفع">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-              {["كاش", "بطاقة", "تحويل"].map(m => (
-                <div key={m} onClick={() => setRentForm({ ...rentForm, pay: m })} style={{ border: `1px solid ${rentForm.pay === m ? C.gold : C.bc}`, borderRadius: 8, padding: ".4rem", textAlign: "center", cursor: "pointer", fontSize: 12, fontWeight: rentForm.pay === m ? 700 : 500, background: rentForm.pay === m ? C.gold + "14" : C.crm }}>{m}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+              {["كاش", "بطاقة", "تحويل", "آجل"].map(m => (
+                <div key={m} onClick={() => (m !== "آجل" || rentForm.customerId) && setRentForm({ ...rentForm, pay: m })} title={m === "آجل" && !rentForm.customerId ? "اختر زبوناً مسجَّلاً أولاً" : undefined} style={{ border: `1px solid ${rentForm.pay === m ? C.gold : C.bc}`, borderRadius: 8, padding: ".4rem", textAlign: "center", cursor: m === "آجل" && !rentForm.customerId ? "not-allowed" : "pointer", fontSize: 12, fontWeight: rentForm.pay === m ? 700 : 500, background: rentForm.pay === m ? C.gold + "14" : C.crm, opacity: m === "آجل" && !rentForm.customerId ? .45 : 1 }}>{m}</div>
               ))}
             </div>
           </Field>

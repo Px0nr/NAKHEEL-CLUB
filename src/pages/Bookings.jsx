@@ -3,10 +3,14 @@ import { C, fmt } from "../constants/theme.js";
 import { TYPE_ICON, TYPE_NAME, TYPE_DEFAULT_RATE } from "../constants/seeds.js";
 import { PageTop, Btn, KCard, Card, CardHead, Table, Badge, Modal, Field, Inp, Sel } from "../components/ui.jsx";
 import { todayISO, arDate } from "../utils/format.js";
+import { rangePreset, QUICK_RANGES } from "../utils/analytics.js";
+import { downloadCsv, downloadExcel } from "../utils/exportTable.js";
+import { customerSaleDelta, applyCustomerSale } from "../utils/customerLink.js";
+import { findConflict, nextReservationToday, isOverdue } from "../utils/reservations.js";
 
 /* ============================ BOOKINGS ============================ */
 export default function Bookings({ ctx }) {
-  const { bookings, setBookings, completedBookings, setCompletedBookings, setInvoices, tables, setTables, cancellations, setCancellations, user, showToast, confirm, settings } = ctx;
+  const { bookings, setBookings, completedBookings, setCompletedBookings, reservations, setReservations, setInvoices, tables, setTables, cancellations, setCancellations, customers, setCustomers, user, showToast, confirm, settings } = ctx;
   const cur = settings?.currency || "د.ل";
   const [modal, setModal] = useState(false);
   const [manageModal, setManageModal] = useState(false);
@@ -14,13 +18,22 @@ export default function Bookings({ ctx }) {
   const [type, setType] = useState("billiard");
   const [tableId, setTableId] = useState(null);
   const [customer, setCustomer] = useState("");
+  const [bkCustomerId, setBkCustomerId] = useState(null);
   const [duration, setDuration] = useState("60"); // بالدقائق: 15 | 30 | 60 | مفتوح (open)
   const [bkPay, setBkPay] = useState("كاش");
+  const [bookMode, setBookMode] = useState("now"); // now | later — حجز مسبق بموعد مستقبلي
+  const [resStartAt, setResStartAt] = useState("");
   const [cancelModal, setCancelModal] = useState(false);
   const [cancelForm, setCancelForm] = useState({ customer: "", resType: "billiard", reason: "عدم حضور", note: "", date: todayISO() });
   const CANCEL_REASONS = ["عدم حضور", "إلغاء بطلب الزبون", "خطأ في التسجيل", "أخرى"];
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force(x => x + 1), 1000); return () => clearInterval(t); }, []);
+  // فلتر النطاق الزمني وسجل الحجوزات المكتملة (يتبعه التصدير أيضاً) — كان السجل
+  // كله يُعرض بلا تاريخ ولا فلترة، فالبطاقات أعلاه كانت تجمع تاريخ النظام كله
+  // رغم تسميتها «اليوم»
+  const [cbFrom, setCbFrom] = useState(todayISO());
+  const [cbTo, setCbTo] = useState(todayISO());
+  const cbApplyQuickRange = (key) => { const r = rangePreset(key); setCbFrom(r.from); setCbTo(r.to); };
 
   const logCancellation = (data) => setCancellations(cs => [{ id: "CN-" + Date.now(), by: user?.name || "—", ...data }, ...cs]);
   const saveCancelLog = () => {
@@ -48,12 +61,13 @@ export default function Bookings({ ctx }) {
   };
   const DUR_OPTS = [{ v: "15", l: "ربع ساعة", s: "15 دقيقة" }, { v: "30", l: "نصف ساعة", s: "30 دقيقة" }, { v: "60", l: "ساعة كاملة", s: "60 دقيقة" }, { v: "open", l: "وقت مفتوح", s: "عدّاد حر" }];
 
-  const start = (tbl, cust, mins, pay) => {
+  const start = (tbl, cust, mins, pay, customerId = null) => {
     const id = "bk_" + Date.now();
     const isOpen = mins === "open";
     const price = isOpen ? 0 : priceForDuration(tbl.rate, mins);
+    const deferred = !isOpen && pay === "آجل";
     setBookings(b => ({ ...b, [id]: {
-      type: tbl.type, tableId: tbl.id, tableName: tbl.name, customer: cust || "زبون",
+      type: tbl.type, tableId: tbl.id, tableName: tbl.name, customer: cust || "زبون", customerId,
       startTime: Date.now(), rate: tbl.rate,
       durationMin: isOpen ? null : parseInt(mins), // null = مفتوح
       prepaid: !isOpen, prepaidAmount: price, pay: pay || "كاش",
@@ -62,8 +76,9 @@ export default function Bookings({ ctx }) {
     if (!isOpen) {
       const invNum = "INV-BK-" + ctx.nextCounter("bkInvoice");
       const durStr = mins === "15" ? "ربع ساعة" : mins === "30" ? "نصف ساعة" : "ساعة";
-      setInvoices(iv => [{ id: invNum, customer: cust || "زبون", date: todayISO(), source: "حجز", details: `${TYPE_NAME[tbl.type]} — ${tbl.name} — ${durStr}`, resType: tbl.type, resName: tbl.name, items: [{ cat: "__booking", name: `${TYPE_NAME[tbl.type]} — ${tbl.name}`, qty: 1, lineTotal: price }], pay, discount: "—", total: price, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
-      showToast(`تم تأكيد الحجز — ${durStr} بـ ${fmt(price)} ${cur} (${pay}) · فاتورة #${invNum}`);
+      setInvoices(iv => [{ id: invNum, customer: cust || "زبون", customerId, date: todayISO(), source: "حجز", details: `${TYPE_NAME[tbl.type]} — ${tbl.name} — ${durStr}`, resType: tbl.type, resName: tbl.name, items: [{ cat: "__booking", name: `${TYPE_NAME[tbl.type]} — ${tbl.name}`, qty: 1, lineTotal: price }], pay: deferred ? "آجل" : pay, discount: "—", total: price, cost: 0, status: deferred ? "معلقة" : "مدفوعة", ...(deferred ? { dueDate: todayISO() } : {}), by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+      if (customerId != null) applyCustomerSale(setCustomers, customerId, customerSaleDelta({ total: price, deferred, settings }), { date: todayISO() });
+      showToast(`تم تأكيد الحجز — ${durStr} بـ ${fmt(price)} ${cur} (${deferred ? "آجل" : pay}) · فاتورة #${invNum}`);
     } else {
       showToast(`بدأ حجز مفتوح على ${tbl.name} — العدّاد يعمل`);
     }
@@ -73,7 +88,7 @@ export default function Bookings({ ctx }) {
     const b = bookings[id]; if (!b) return;
     // الحجز المدفوع مقدماً: أُنشئت فاتورته عند البدء — الإنهاء يحرّر الطاولة فقط
     if (b.prepaid) {
-      setCompletedBookings(cb => [{ type: b.type, tableName: b.tableName, customer: b.customer, dur: b.durationMin >= 60 ? "ساعة" : b.durationMin === 30 ? "نصف ساعة" : "ربع ساعة", rate: b.rate, total: b.prepaidAmount, inv: "مدفوع مقدماً" }, ...cb]);
+      setCompletedBookings(cb => [{ type: b.type, tableName: b.tableName, customer: b.customer, dur: b.durationMin >= 60 ? "ساعة" : b.durationMin === 30 ? "نصف ساعة" : "ربع ساعة", rate: b.rate, total: b.prepaidAmount, inv: "مدفوع مقدماً", date: todayISO() }, ...cb]);
       setBookings(bk => { const n = { ...bk }; delete n[id]; return n; });
       showToast(`انتهى حجز ${b.tableName}`);
       return;
@@ -85,11 +100,83 @@ export default function Bookings({ ctx }) {
     const durMin = Math.round(ms / 60000);
     const durStr = durMin >= 60 ? `${Math.floor(durMin / 60)}س ${durMin % 60}د` : `${durMin}د`;
     const invNum = "INV-AUTO-" + ctx.nextCounter("autoInvoice");
-    setCompletedBookings(cb => [{ type: b.type, tableName: b.tableName, customer: b.customer, dur: durStr, rate: b.rate, total, inv: invNum }, ...cb]);
-    setInvoices(iv => [{ id: invNum, customer: b.customer, date: todayISO(), source: "حجز", details: `${TYPE_NAME[b.type]} — ${b.tableName} — ${durStr}`, resType: b.type, resName: b.tableName, items: [{ cat: "__booking", name: `${TYPE_NAME[b.type]} — ${b.tableName}`, qty: 1, lineTotal: Math.round(total * 10) / 10 }], pay: b.pay || "كاش", discount: "—", total: Math.round(total * 10) / 10, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+    const roundedTotal = Math.round(total * 10) / 10;
+    setCompletedBookings(cb => [{ type: b.type, tableName: b.tableName, customer: b.customer, dur: durStr, rate: b.rate, total, inv: invNum, date: todayISO() }, ...cb]);
+    setInvoices(iv => [{ id: invNum, customer: b.customer, customerId: b.customerId, date: todayISO(), source: "حجز", details: `${TYPE_NAME[b.type]} — ${b.tableName} — ${durStr}`, resType: b.type, resName: b.tableName, items: [{ cat: "__booking", name: `${TYPE_NAME[b.type]} — ${b.tableName}`, qty: 1, lineTotal: roundedTotal }], pay: b.pay || "كاش", discount: "—", total: roundedTotal, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+    if (b.customerId != null) applyCustomerSale(setCustomers, b.customerId, customerSaleDelta({ total: roundedTotal, deferred: false, settings }), { date: todayISO() });
     setBookings(bk => { const n = { ...bk }; delete n[id]; return n; });
-    showToast(`فاتورة تلقائية #${invNum} — ${fmt(Math.round(total * 10) / 10)} ${cur}`);
+    showToast(`فاتورة تلقائية #${invNum} — ${fmt(roundedTotal)} ${cur}`);
   };
+
+  // اختيار زبون مسجَّل للحجز — يملأ الاسم ويربط العملية بسجله (نقاط ولاء، بيع
+  // آجل، إجمالي مشتريات حقيقي) بدل اسم حرّ منفصل عن سجل الزبائن تماماً
+  const pickBkCustomer = (id) => {
+    const c = customers.find(x => String(x.id) === String(id));
+    if (c) { setCustomer(c.name); setBkCustomerId(c.id); }
+  };
+  const resetBookingModal = () => {
+    setCustomer(""); setBkCustomerId(null); setDuration("60"); setBkPay("كاش"); setBookMode("now"); setResStartAt("");
+  };
+
+  // حجز مسبق بموعد مستقبلي — يُخزَّن في reservations منفصلة عن bookings النشطة
+  // ولا يُنشئ فاتورة إلا عند تسجيل الوصول الفعلي (checkInReservation)
+  const createReservation = () => {
+    const tbl = tables.find(x => x.id === tableId);
+    if (!tbl) { showToast("اختر طاولة"); return; }
+    if (!customer.trim()) { showToast("أدخل اسم الزبون"); return; }
+    if (duration === "open") { showToast("الحجز المسبق يتطلب مدة محددة — الوقت المفتوح لا يناسب موعداً مستقبلياً"); return; }
+    if (!resStartAt) { showToast("اختر تاريخ ووقت الحجز"); return; }
+    const start = new Date(resStartAt).getTime();
+    if (isNaN(start) || start < Date.now() - 60000) { showToast("اختر موعداً في المستقبل"); return; }
+    if (bkPay === "آجل" && !bkCustomerId) { showToast("البيع الآجل يتطلب اختيار زبون مسجَّل"); return; }
+    const mins = parseInt(duration);
+    const end = start + mins * 60000;
+    const conflict = findConflict(tableId, start, end, { bookings, reservations });
+    if (conflict) {
+      const at = new Date(conflict.start).toLocaleTimeString("ar-LY", { hour: "2-digit", minute: "2-digit" });
+      showToast(`تعارض: ${tbl.name} محجوزة لـ${conflict.customer} الساعة ${at} — اختر موعداً آخر`);
+      return;
+    }
+    const price = priceForDuration(tbl.rate, duration);
+    setReservations(rs => [...rs, {
+      id: "RS-" + Date.now(), tableId, tableName: tbl.name, type, customerName: customer.trim(), customerId: bkCustomerId,
+      startAt: new Date(start).toISOString(), durationMin: mins, rate: tbl.rate, price, pay: bkPay, status: "محجوز", createdAt: todayISO(), by: user?.name || "—",
+    }]);
+    showToast(`تم حجز ${tbl.name} لـ${customer.trim()} الساعة ${new Date(start).toLocaleTimeString("ar-LY", { hour: "2-digit", minute: "2-digit" })}`);
+    setModal(false); resetBookingModal();
+  };
+
+  // تسجيل وصول صاحب حجز مسبق — يتحوّل إلى حجز نشط عادي بنفس السعر والمدة
+  // المتفق عليهما وقت الحجز (لا سعر الطاولة الحالي إن تغيّر لاحقاً)
+  const checkInReservation = (res) => {
+    if (busy(res.tableId)) { showToast("الطاولة مشغولة الآن بحجز آخر — أنهِه أولاً"); return; }
+    const id = "bk_" + Date.now();
+    const deferred = res.pay === "آجل";
+    setBookings(b => ({ ...b, [id]: {
+      type: res.type, tableId: res.tableId, tableName: res.tableName, customer: res.customerName, customerId: res.customerId,
+      startTime: Date.now(), rate: res.rate, durationMin: res.durationMin, prepaid: true, prepaidAmount: res.price, pay: res.pay,
+    } }));
+    const invNum = "INV-BK-" + ctx.nextCounter("bkInvoice");
+    const durStr = res.durationMin >= 60 ? "ساعة" : res.durationMin === 30 ? "نصف ساعة" : "ربع ساعة";
+    setInvoices(iv => [{ id: invNum, customer: res.customerName, customerId: res.customerId, date: todayISO(), source: "حجز", details: `${TYPE_NAME[res.type]} — ${res.tableName} — ${durStr}`, resType: res.type, resName: res.tableName, items: [{ cat: "__booking", name: `${TYPE_NAME[res.type]} — ${res.tableName}`, qty: 1, lineTotal: res.price }], pay: deferred ? "آجل" : res.pay, discount: "—", total: res.price, cost: 0, status: deferred ? "معلقة" : "مدفوعة", ...(deferred ? { dueDate: todayISO() } : {}), by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+    if (res.customerId != null) applyCustomerSale(setCustomers, res.customerId, customerSaleDelta({ total: res.price, deferred, settings }), { date: todayISO() });
+    setReservations(rs => rs.filter(r => r.id !== res.id));
+    showToast(`تم تسجيل وصول ${res.customerName} — ${res.tableName}`);
+  };
+
+  const cancelReservation = async (res) => {
+    if (!(await confirm(`إلغاء حجز ${res.tableName} لـ${res.customerName}؟`))) return;
+    logCancellation({ date: todayISO(), customer: res.customerName, resType: res.type, resName: res.tableName, reason: "إلغاء بطلب الزبون", note: "حجز مسبق" });
+    setReservations(rs => rs.filter(r => r.id !== res.id));
+    showToast("أُلغي الحجز المسبق");
+  };
+  const noShowReservation = async (res) => {
+    if (!(await confirm(`تسجيل عدم حضور ${res.customerName} لحجز ${res.tableName}؟`))) return;
+    logCancellation({ date: todayISO(), customer: res.customerName, resType: res.type, resName: res.tableName, reason: "عدم حضور", note: "حجز مسبق — لم يصل بعد مضي مهلة السماح" });
+    setReservations(rs => rs.filter(r => r.id !== res.id));
+    showToast("سُجِّل عدم الحضور");
+  };
+  const todayReservations = [...reservations].filter(r => r.status === "محجوز" && r.startAt.slice(0, 10) === todayISO()).sort((a, b) => a.startAt.localeCompare(b.startAt));
 
   const elapsed = (st) => {
     const ms = Date.now() - st;
@@ -97,7 +184,17 @@ export default function Bookings({ ctx }) {
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
   const busyCount = Object.keys(bookings).length;
-  const todayRev = completedBookings.reduce((s, b) => s + b.total, 0);
+  // بلا حقل تاريخ سابقاً، فكانت هذه البطاقات المسمّاة «اليوم» تجمع تاريخ النظام
+  // كله منذ التركيب — أصبحت الآن تُقيَّد فعلياً بتاريخ اليوم
+  const todayCompleted = completedBookings.filter(b => b.date === todayISO());
+  const todayRev = todayCompleted.reduce((s, b) => s + b.total, 0);
+  // سجل الحجوزات المكتملة: فلترة وتصدير — نفس نمط سجل المبيعات
+  const cbShown = completedBookings.filter(b => (!cbFrom || (b.date || "") >= cbFrom) && (!cbTo || (b.date || "") <= cbTo));
+  const cbExportSheet = () => [{
+    name: "الحجوزات المكتملة",
+    thead: ["النشاط", "الطاولة", "الزبون", "المدة", "السعر/ساعة", "الإجمالي", "الفاتورة", "التاريخ"],
+    tbody: cbShown.map(b => [TYPE_NAME[b.type] || b.type, b.tableName, b.customer, b.dur, b.rate, Math.round(b.total * 10) / 10, b.inv, b.date || "—"]),
+  }];
 
   /* ---- table management ---- */
   const saveTable = (data) => {
@@ -124,6 +221,7 @@ export default function Bookings({ ctx }) {
   const openNewBooking = () => {
     const first = tablesByType("billiard")[0] || tables[0];
     if (first) { setType(first.type); setTableId(first.id); }
+    resetBookingModal();
     setModal(true);
   };
 
@@ -139,8 +237,8 @@ export default function Bookings({ ctx }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 11, marginBottom: "1.1rem" }}>
         <KCard label="مشغولة الآن" value={busyCount} sub={`من ${tables.length} طاولة`} bar="#1a8c3e" />
         <KCard label="إيراد الحجوزات" value={fmt(todayRev)} sub={cur} bar={C.gold} />
-        <KCard label="حجوزات مكتملة" value={completedBookings.length} sub="اليوم" bar="#2a78d6" />
-        <KCard label="فواتير تلقائية" value={completedBookings.length} sub="عند الخروج" bar={C.purp} />
+        <KCard label="حجوزات مكتملة" value={todayCompleted.length} sub="اليوم" bar="#2a78d6" />
+        <KCard label="فواتير تلقائية" value={todayCompleted.length} sub="اليوم — عند الخروج" bar={C.purp} />
       </div>
       <Card>
         <CardHead title="حالة الطاولات والملاعب — مباشر" sub="🟢 تحديث تلقائي كل ثانية" />
@@ -179,12 +277,14 @@ export default function Bookings({ ctx }) {
                   </div>
                 );
               }
+              const upcoming = nextReservationToday(tb.id, reservations);
               return (
-                <div key={tb.id} style={{ borderRadius: 13, padding: ".9rem", border: `1px solid ${C.bc}`, background: C.crm }}>
+                <div key={tb.id} style={{ borderRadius: 13, padding: ".9rem", border: `1px solid ${upcoming ? C.gold + "88" : C.bc}`, background: C.crm }}>
                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: ".5rem" }}>{TYPE_ICON[tb.type]} {tb.name}</div>
                   <div style={{ fontSize: 26, color: C.mt, textAlign: "center", marginBottom: 2 }}>○</div>
                   <div style={{ textAlign: "center", fontSize: 10.5, color: C.mt, marginBottom: 8 }}>متاحة · {tb.rate} {cur}/س</div>
-                  <button onClick={() => { setType(tb.type); setTableId(tb.id); setDuration("60"); setBkPay("كاش"); setCustomer(""); setModal(true); }} style={{ width: "100%", padding: ".45rem", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: C.grl, color: "#fff", fontFamily: "inherit" }}>▶ حجز</button>
+                  {upcoming && <div style={{ textAlign: "center", fontSize: 10, color: C.gdd, fontWeight: 700, background: C.gold + "18", borderRadius: 6, padding: "2px 4px", marginBottom: 6 }}>📅 محجوزة {new Date(upcoming.startAt).toLocaleTimeString("ar-LY", { hour: "2-digit", minute: "2-digit" })} — {upcoming.customerName}</div>}
+                  <button onClick={() => { setType(tb.type); setTableId(tb.id); resetBookingModal(); setModal(true); }} style={{ width: "100%", padding: ".45rem", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: C.grl, color: "#fff", fontFamily: "inherit" }}>▶ حجز</button>
                 </div>
               );
             })}
@@ -192,11 +292,51 @@ export default function Bookings({ ctx }) {
         )}
       </Card>
 
+      {/* الجدول الزمني لليوم — حجوزات مسبقة لم تبدأ بعد، مرتَّبة زمنياً لكل طاولة.
+          كانت الشاشة تعرض إشغالاً حيّاً فقط بلا أي طريقة لتسجيل «الطاولة 3 محجوزة الساعة 8» مسبقاً */}
+      {todayReservations.length > 0 && (
+        <Card style={{ marginTop: 11 }}>
+          <CardHead title="📅 الجدول الزمني لليوم" sub={`${todayReservations.length} حجز مسبق لم يبدأ بعد`} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {todayReservations.map(res => {
+              const overdue = isOverdue(res);
+              const timeStr = new Date(res.startAt).toLocaleTimeString("ar-LY", { hour: "2-digit", minute: "2-digit" });
+              return (
+                <div key={res.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, background: overdue ? C.redbg : C.crm, border: `1px solid ${overdue ? "rgba(192,57,43,.35)" : C.bc}`, borderRadius: 10, padding: ".6rem .85rem" }}>
+                  <div style={{ fontSize: 12.5 }}>
+                    <b>{timeStr}</b> — {TYPE_ICON[res.type]} {res.tableName} · 👤 {res.customerName} · {fmt(res.price)} {cur} ({res.pay})
+                    {overdue && <span style={{ color: C.red, fontWeight: 700, marginRight: 6 }}>⏰ متأخر عن الموعد</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Btn sm gold onClick={() => checkInReservation(res)}>▶ تسجيل الوصول</Btn>
+                    {overdue
+                      ? <Btn sm danger onClick={() => noShowReservation(res)}>عدم حضور</Btn>
+                      : <Btn sm onClick={() => cancelReservation(res)}>✕ إلغاء</Btn>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       <Card style={{ marginTop: 11 }}>
-        <CardHead title="آخر الحجوزات المكتملة" sub={completedBookings.length > 50 ? `عرض أحدث 50 من ${fmt(completedBookings.length)}` : undefined} />
-        {completedBookings.length === 0 ? <div style={{ color: C.mt, fontSize: 12, padding: "1rem 0", textAlign: "center" }}>لا توجد حجوزات مكتملة بعد — ابدأ حجزاً ثم أنهِه لترى الفوترة التلقائية</div> :
-          <Table cols={[{ h: "النشاط", w: "22%" }, { h: "الزبون", w: "18%" }, { h: "المدة", w: "14%" }, { h: "السعر/ساعة", w: "14%" }, { h: "الإجمالي", w: "14%" }, { h: "الفاتورة", w: "18%" }]}
-            rows={completedBookings.slice(0, 50).map(b => [`${TYPE_ICON[b.type]} ${TYPE_NAME[b.type]} — ${b.tableName}`, b.customer, b.dur, b.rate + " " + cur, fmt(Math.round(b.total * 10) / 10) + " " + cur, <Badge tone="b">#{b.inv}</Badge>])} />}
+        <CardHead title="سجل الحجوزات المكتملة" sub={`${fmt(cbShown.length)} من ${fmt(completedBookings.length)} إجمالاً`} right={
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <Sel value="" onChange={e => e.target.value && cbApplyQuickRange(e.target.value)} style={{ width: 120 }}>
+              <option value="">— نطاق سريع —</option>
+              {QUICK_RANGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </Sel>
+            <Inp type="date" value={cbFrom} onChange={e => setCbFrom(e.target.value)} aria-label="من تاريخ" style={{ width: 135 }} />
+            <Inp type="date" value={cbTo} onChange={e => setCbTo(e.target.value)} aria-label="إلى تاريخ" style={{ width: 135 }} />
+            <Btn sm onClick={() => downloadCsv(cbExportSheet(), `الحجوزات-${cbFrom}-${cbTo}`)}>⬇ CSV</Btn>
+            <Btn sm onClick={() => downloadExcel(cbExportSheet(), `الحجوزات-${cbFrom}-${cbTo}`)}>📊 Excel</Btn>
+          </div>
+        } />
+        {cbShown.length === 0 ? <div style={{ color: C.mt, fontSize: 12, padding: "1rem 0", textAlign: "center" }}>لا توجد حجوزات مكتملة ضمن هذا النطاق</div> :
+          <Table cols={[{ h: "النشاط", w: "20%" }, { h: "الزبون", w: "16%" }, { h: "المدة", w: "12%" }, { h: "السعر/ساعة", w: "12%" }, { h: "الإجمالي", w: "12%" }, { h: "الفاتورة", w: "14%" }, { h: "التاريخ", w: "14%" }]}
+            rows={cbShown.slice(0, 100).map(b => [`${TYPE_ICON[b.type]} ${TYPE_NAME[b.type]} — ${b.tableName}`, b.customer, b.dur, b.rate + " " + cur, fmt(Math.round(b.total * 10) / 10) + " " + cur, <Badge tone="b">#{b.inv}</Badge>, b.date ? arDate(b.date) : "—"])} />}
+        {cbShown.length > 100 && <div style={{ fontSize: 11, color: C.mt, textAlign: "center", marginTop: 8 }}>يعرض أحدث 100 من {fmt(cbShown.length)} — ضيّق النطاق الزمني أو صدِّر الكل</div>}
       </Card>
 
       {cancellations.length > 0 && (
@@ -246,11 +386,30 @@ export default function Bookings({ ctx }) {
               {tablesByType(type).length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", color: C.mt, fontSize: 12, padding: ".5rem" }}>لا توجد طاولات لهذا النوع.</div>}
             </div>
           </Field>
-          <Field label="اسم الزبون"><Inp value={customer} onChange={e => setCustomer(e.target.value)} placeholder="محمد علي" /></Field>
+          <Field label="متى؟" full>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
+              <div onClick={() => setBookMode("now")} style={{ border: `1px solid ${bookMode === "now" ? C.gold : C.bc}`, borderRadius: 9, padding: ".5rem", textAlign: "center", cursor: "pointer", fontSize: 12.5, fontWeight: bookMode === "now" ? 700 : 500, background: bookMode === "now" ? "rgba(201,168,76,.12)" : C.crm }}>▶ الآن</div>
+              <div onClick={() => setBookMode("later")} style={{ border: `1px solid ${bookMode === "later" ? C.gold : C.bc}`, borderRadius: 9, padding: ".5rem", textAlign: "center", cursor: "pointer", fontSize: 12.5, fontWeight: bookMode === "later" ? 700 : 500, background: bookMode === "later" ? "rgba(201,168,76,.12)" : C.crm }}>📅 حجز لاحقاً</div>
+            </div>
+          </Field>
+
+          <Field label="زبون مسجَّل (اختياري)">
+            <Sel value={bkCustomerId || ""} onChange={e => e.target.value ? pickBkCustomer(e.target.value) : setBkCustomerId(null)}>
+              <option value="">— زبون جديد / بلا ربط —</option>
+              {customers.map(c => <option key={c.id} value={c.id}>{c.name} — {c.phone}</option>)}
+            </Sel>
+          </Field>
+          <Field label="اسم الزبون"><Inp value={customer} onChange={e => { setCustomer(e.target.value); setBkCustomerId(null); }} placeholder="محمد علي" /></Field>
+
+          {bookMode === "later" && (
+            <Field label="تاريخ ووقت الحجز" full>
+              <Inp type="datetime-local" value={resStartAt} min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} onChange={e => setResStartAt(e.target.value)} />
+            </Field>
+          )}
 
           <Field label="مدة الحجز" full>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 7 }}>
-              {DUR_OPTS.map(o => {
+              {DUR_OPTS.filter(o => bookMode === "now" || o.v !== "open").map(o => {
                 const price = priceForDuration(rateOf(tableId), o.v);
                 return (
                   <div key={o.v} onClick={() => setDuration(o.v)} style={{ border: `1.5px solid ${duration === o.v ? C.gold : C.bc}`, borderRadius: 10, padding: ".55rem .7rem", cursor: "pointer", background: duration === o.v ? C.gold + "14" : C.crm, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -260,13 +419,14 @@ export default function Bookings({ ctx }) {
                 );
               })}
             </div>
+            {bookMode === "later" && <div style={{ fontSize: 10.5, color: C.mt, marginTop: 4 }}>الحجز المسبق يتطلب مدة محددة (لا وقت مفتوح) حتى يمكن فحص تعارضه مع حجوزات أخرى.</div>}
           </Field>
 
-          {duration !== "open" && (
+          {(duration !== "open" || bookMode === "later") && (
             <Field label="طريقة الدفع" full>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-                {["كاش", "بطاقة", "تحويل"].map(m => (
-                  <div key={m} onClick={() => setBkPay(m)} style={{ border: `1px solid ${bkPay === m ? C.gold : C.bc}`, borderRadius: 8, padding: ".45rem", textAlign: "center", cursor: "pointer", fontSize: 12, fontWeight: bkPay === m ? 700 : 500, background: bkPay === m ? C.gold + "14" : C.crm, color: bkPay === m ? C.grn2 : C.k2 }}>{m}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                {["كاش", "بطاقة", "تحويل", "آجل"].map(m => (
+                  <div key={m} onClick={() => (m !== "آجل" || bkCustomerId) && setBkPay(m)} title={m === "آجل" && !bkCustomerId ? "اختر زبوناً مسجَّلاً أولاً" : undefined} style={{ border: `1px solid ${bkPay === m ? C.gold : C.bc}`, borderRadius: 8, padding: ".45rem", textAlign: "center", cursor: m === "آجل" && !bkCustomerId ? "not-allowed" : "pointer", fontSize: 12, fontWeight: bkPay === m ? 700 : 500, background: bkPay === m ? C.gold + "14" : C.crm, color: bkPay === m ? C.grn2 : C.k2, opacity: m === "آجل" && !bkCustomerId ? .45 : 1 }}>{m}</div>
                 ))}
               </div>
             </Field>
@@ -279,13 +439,15 @@ export default function Bookings({ ctx }) {
 
           <div style={{ display: "flex", gap: 8 }}>
             <Btn gold style={{ flex: 1, justifyContent: "center" }} onClick={() => {
+              if (bookMode === "later") { createReservation(); return; }
               const tbl = tables.find(t => t.id === tableId);
               if (!tbl) { showToast("اختر طاولة"); return; }
               if (busy(tableId)) { showToast("الطاولة مشغولة"); return; }
-              start(tbl, customer, duration, bkPay);
-              setModal(false); setCustomer(""); setDuration("60"); setBkPay("كاش");
-            }}>{duration === "open" ? "▶ بدء الحجز المفتوح" : "✓ تأكيد الحجز والدفع"}</Btn>
-            <Btn onClick={() => setModal(false)}>إلغاء</Btn>
+              if (bkPay === "آجل" && !bkCustomerId) { showToast("البيع الآجل يتطلب اختيار زبون مسجَّل"); return; }
+              start(tbl, customer, duration, bkPay, bkCustomerId);
+              setModal(false); resetBookingModal();
+            }}>{bookMode === "later" ? "📅 تأكيد الحجز المسبق" : duration === "open" ? "▶ بدء الحجز المفتوح" : "✓ تأكيد الحجز والدفع"}</Btn>
+            <Btn onClick={() => { setModal(false); resetBookingModal(); }}>إلغاء</Btn>
           </div>
         </Modal>
       )}

@@ -224,6 +224,7 @@ function NakheelApp() {
   const [tables, setTables] = usePersistentState("tables", SEED_TABLES, true);
   const [cats, setCats] = usePersistentState("cats", { games: "ألعاب فيديو", cafe: "كافيه" }, true);
   const [completedBookings, setCompletedBookings] = usePersistentState("completed_bookings", []);
+  const [reservations, setReservations] = usePersistentState("reservations", []); // حجوزات مستقبلية لم تبدأ بعد
   // عدّادات تسلسلية دائمة لأرقام الفواتير/التوريدات (لا تتكرر أبداً حتى بعد حذف سجلات) —
   // القيم الابتدائية تطابق الترقيم القديم المعتمد على .length لضمان استمرارية الأرقام
   const [counters, setCounters] = usePersistentState("counters", { invoice: 1047, po: 234, bkInvoice: 0, autoInvoice: 8, rtInvoice: 0, obInvoice: 0 }, true);
@@ -418,6 +419,7 @@ function NakheelApp() {
     capitalMoves, setCapitalMoves,
     reportPresets, setReportPresets,
     bookings, setBookings, completedBookings, setCompletedBookings, tables, setTables,
+    reservations, setReservations,
     cats, setCats,
     settings, setSettings,
     nextCounter: (key) => nextCounter(counters, setCounters, key),

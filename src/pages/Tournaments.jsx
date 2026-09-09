@@ -4,34 +4,53 @@ import { PageTop, Btn, Card, CardHead, Badge, Modal, Field, Inp, Sel } from "../
 import { openPdfDoc } from "../components/pdfHook.js";
 import { todayISO, arDate } from "../utils/format.js";
 import { buildBracket, roundLabels, setMatchWinner } from "../utils/bracket.js";
+import { customerSaleDelta, applyCustomerSale } from "../utils/customerLink.js";
 
 /* ============================ TOURNAMENTS (الدوريات والمسابقات) ============================ */
 export default function Tournaments({ ctx }) {
-  const { tournaments, setTournaments, showToast } = ctx;
+  const { tournaments, setTournaments, customers, setCustomers, setInvoices, setExpenses, user, showToast } = ctx;
+  const cur = ctx.settings?.currency || "د.ل";
   const [selected, setSelected] = useState(null);
   const [modal, setModal] = useState(false);
   const GAME_TYPES = ["تنس طاولة", "بلايستيشن — FIFA", "بلايستيشن — مصارعة", "بلياردو", "أخرى"];
-  const [f, setF] = useState({ name: "", game: "تنس طاولة", size: "8", startDate: todayISO(), prize: "" });
-  const [pf, setPf] = useState({ name: "", phone: "" });
+  const [f, setF] = useState({ name: "", game: "تنس طاولة", size: "8", startDate: todayISO(), prize: "", feeAmount: "", prizeAmount: "" });
+  const [pf, setPf] = useState({ name: "", phone: "", customerId: null, pay: "كاش" });
 
   const t = tournaments.find(x => x.id === selected);
   const pName = (id) => t?.participants.find(p => p.id === id)?.name || (id ? "؟" : "—");
 
   const createTournament = () => {
     if (!f.name.trim()) { showToast("أدخل اسم الدوري"); return; }
-    const nt = { id: "TN-" + Date.now(), name: f.name.trim(), game: f.game, size: parseInt(f.size), startDate: f.startDate, prize: f.prize.trim(), status: "تسجيل", participants: [], rounds: null, champion: null, runnerUp: null, createdAt: todayISO() };
+    const feeAmount = Math.max(0, parseFloat(f.feeAmount) || 0);
+    const prizeAmount = Math.max(0, parseFloat(f.prizeAmount) || 0);
+    const nt = { id: "TN-" + Date.now(), name: f.name.trim(), game: f.game, size: parseInt(f.size), startDate: f.startDate, prize: f.prize.trim(), feeAmount, prizeAmount, prizeLogged: false, status: "تسجيل", participants: [], rounds: null, champion: null, runnerUp: null, createdAt: todayISO() };
     setTournaments(ts => [nt, ...ts]);
     showToast("تم إنشاء الدوري — ابدأ بتسجيل المشتركين");
-    setModal(false); setF({ name: "", game: "تنس طاولة", size: "8", startDate: todayISO(), prize: "" });
+    setModal(false); setF({ name: "", game: "تنس طاولة", size: "8", startDate: todayISO(), prize: "", feeAmount: "", prizeAmount: "" });
     setSelected(nt.id);
+  };
+
+  // اختيار زبون مسجَّل يملأ الاسم تلقائياً ويربط رسم الاشتراك بسجله (نقاط ولاء
+  // وإجمالي مشتريات) — سابقاً كان اسم المشترك نصّاً حرّاً منفصلاً عن سجل الزبائن
+  const pickParticipantCustomer = (id) => {
+    const c = customers.find(x => String(x.id) === String(id));
+    if (c) setPf(v => ({ ...v, name: c.name, phone: c.phone || v.phone, customerId: c.id }));
   };
 
   const addParticipant = () => {
     if (!pf.name.trim()) { showToast("أدخل اسم المشترك"); return; }
     if (t.participants.length >= t.size) { showToast(`الحد الأقصى ${t.size} مشتركين لهذا الدوري`); return; }
-    const p = { id: "pt" + Date.now(), name: pf.name.trim(), phone: pf.phone.trim() };
+    const fee = t.feeAmount || 0;
+    const p = { id: "pt" + Date.now(), name: pf.name.trim(), phone: pf.phone.trim(), customerId: pf.customerId, feePaid: fee > 0 };
     setTournaments(ts => ts.map(x => x.id === t.id ? { ...x, participants: [...x.participants, p] } : x));
-    setPf({ name: "", phone: "" });
+    // رسم اشتراك — يُصدر فاتورة فورية عند التسجيل، مثل أي بيع آخر في النادي
+    if (fee > 0) {
+      const invNum = "INV-TN-" + ctx.nextCounter("tnInvoice");
+      setInvoices(iv => [{ id: invNum, customer: p.name, customerId: p.customerId, date: todayISO(), source: "دوري", details: `اشتراك — ${t.name}`, items: [{ cat: "__tournament", name: `اشتراك دوري — ${t.name}`, qty: 1, lineTotal: fee }], pay: pf.pay, discount: "—", total: fee, cost: 0, status: "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5) }, ...iv]);
+      if (p.customerId != null) applyCustomerSale(setCustomers, p.customerId, customerSaleDelta({ total: fee, deferred: false, settings: ctx.settings }), { date: todayISO() });
+      showToast(`تم تسجيل ${p.name} — رسم اشتراك ${fee} ${cur}`);
+    }
+    setPf({ name: "", phone: "", customerId: null, pay: "كاش" });
   };
   const removeParticipant = (pid) => setTournaments(ts => ts.map(x => x.id === t.id ? { ...x, participants: x.participants.filter(p => p.id !== pid) } : x));
 
@@ -48,7 +67,16 @@ export default function Tournaments({ ctx }) {
     const sc = scoreInputs[key] || {};
     const { rounds, champion, runnerUp } = setMatchWinner(t.rounds, roundIdx, matchIdx, winnerId, sc.s1, sc.s2);
     setTournaments(ts => ts.map(x => x.id === t.id ? { ...x, rounds, champion, runnerUp, status: champion ? "منتهية" : "جارٍ" } : x));
-    if (champion) showToast(`🏆 انتهى الدوري — البطل: ${pName(champion)}`);
+    if (champion) {
+      showToast(`🏆 انتهى الدوري — البطل: ${pName(champion)}`);
+      // قيمة الجائزة (إن حُدِّدت) تُسجَّل مصروفاً تلقائياً — كانت البطولة تختفي
+      // مالياً بالكامل من كل تقرير رغم كونها نشاطاً حقيقياً بتكلفة حقيقية.
+      // prizeLogged يمنع تكرار القيد لو أُعيد فتح نفس المباراة الأخيرة لاحقاً
+      if (t.prizeAmount > 0 && !t.prizeLogged) {
+        setExpenses(e => [{ id: Math.max(0, ...e.map(x => x.id)) + 1, date: todayISO(), cat: "جوائز الدوريات", desc: `جائزة دوري «${t.name}» — البطل: ${pName(champion)}`, amount: t.prizeAmount, pay: "نقداً", by: user?.name?.split(" ")[0] || "—", empId: null, empName: null, dept: null }, ...e]);
+        setTournaments(ts => ts.map(x => x.id === t.id ? { ...x, prizeLogged: true } : x));
+      }
+    }
   };
 
   const deleteTournament = (id) => {
@@ -132,8 +160,12 @@ export default function Tournaments({ ctx }) {
               <Field label="نوع اللعبة"><Sel value={f.game} onChange={e => setF({ ...f, game: e.target.value })}>{GAME_TYPES.map(g => <option key={g}>{g}</option>)}</Sel></Field>
               <Field label="حجم القرعة"><Sel value={f.size} onChange={e => setF({ ...f, size: e.target.value })}><option value="4">4 مشتركين</option><option value="8">8 مشتركين</option><option value="16">16 مشتركاً</option></Sel></Field>
               <Field label="تاريخ البدء"><Inp type="date" value={f.startDate} onChange={e => setF({ ...f, startDate: e.target.value })} /></Field>
-              <Field label="الجائزة (اختياري)"><Inp value={f.prize} onChange={e => setF({ ...f, prize: e.target.value })} placeholder="مثال: كأس + 100 د.ل" /></Field>
+              <Field label="رسم الاشتراك للفرد (اختياري)"><Inp type="number" min="0" value={f.feeAmount} onChange={e => setF({ ...f, feeAmount: e.target.value })} placeholder="0" /></Field>
+              <Field label="وصف الجائزة (اختياري)"><Inp value={f.prize} onChange={e => setF({ ...f, prize: e.target.value })} placeholder="مثال: كأس + ميدالية" /></Field>
+              <Field label={`قيمة الجائزة النقدية (${cur}) — اختياري`}><Inp type="number" min="0" value={f.prizeAmount} onChange={e => setF({ ...f, prizeAmount: e.target.value })} placeholder="0" /></Field>
             </div>
+            {parseFloat(f.feeAmount) > 0 && <div style={{ fontSize: 11, color: C.gdd, background: C.gold + "12", borderRadius: 8, padding: ".5rem .7rem", marginBottom: 8 }}>سيُصدر فاتورة رسم اشتراك تلقائياً لكل مشترك عند تسجيله.</div>}
+            {parseFloat(f.prizeAmount) > 0 && <div style={{ fontSize: 11, color: C.gdd, background: C.gold + "12", borderRadius: 8, padding: ".5rem .7rem", marginBottom: 8 }}>ستُسجَّل قيمة الجائزة مصروفاً تلقائياً عند تتويج البطل.</div>}
             <div style={{ fontSize: 11, color: C.mt, margin: "4px 0 12px", lineHeight: 1.7 }}>بعد الإنشاء، سجّل المشتركين ثم اضغط «إجراء القرعة» لبدء الدوري تلقائياً بأدوار عشوائية (ربع نهائي/نصف نهائي/نهائي حسب العدد).</div>
             <div style={{ display: "flex", gap: 8 }}><Btn gold onClick={createTournament} style={{ flex: 1, justifyContent: "center" }}>✓ إنشاء</Btn><Btn onClick={() => setModal(false)}>إلغاء</Btn></div>
           </Modal>
@@ -158,7 +190,7 @@ export default function Tournaments({ ctx }) {
           <Badge tone={STATUS_TONE[t.status]}>{t.status}</Badge>
         </div>
       } />
-      <div style={{ fontSize: 12.5, color: C.mt, marginBottom: 14 }}>{t.game} · بدأ {arDate(t.startDate)} · {t.size} مقاعد{t.prize ? ` · 🎁 ${t.prize}` : ""}</div>
+      <div style={{ fontSize: 12.5, color: C.mt, marginBottom: 14 }}>{t.game} · بدأ {arDate(t.startDate)} · {t.size} مقاعد{t.prize ? ` · 🎁 ${t.prize}` : ""}{t.prizeAmount > 0 ? ` (${t.prizeAmount} ${cur})` : ""}{t.feeAmount > 0 ? ` · 💳 اشتراك ${t.feeAmount} ${cur}/فرد` : ""}</div>
 
       {t.status === "منتهية" && t.champion && (
         <div style={{ background: "linear-gradient(135deg,#fff7eb,#fffdf5)", border: `1.5px solid ${C.gold}`, borderRadius: 16, padding: "1.4rem", textAlign: "center", marginBottom: "1.2rem" }}>
@@ -173,9 +205,24 @@ export default function Tournaments({ ctx }) {
         <div style={{ display: "grid", gridTemplateColumns: ctx.scr?.isTab ? "1fr" : "1fr 1.3fr", gap: 12 }}>
           <Card>
             <CardHead title="تسجيل مشترك جديد" sub={`${t.participants.length} / ${t.size}`} />
-            <Field label="اسم المشترك"><Inp value={pf.name} onChange={e => setPf({ ...pf, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addParticipant()} placeholder="الاسم الكامل" /></Field>
+            <Field label="زبون مسجَّل (اختياري)">
+              <Sel value={pf.customerId || ""} onChange={e => e.target.value ? pickParticipantCustomer(e.target.value) : setPf(v => ({ ...v, customerId: null }))}>
+                <option value="">— مشترك جديد / بلا ربط —</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name} — {c.phone}</option>)}
+              </Sel>
+            </Field>
+            <Field label="اسم المشترك"><Inp value={pf.name} onChange={e => setPf({ ...pf, name: e.target.value, customerId: null })} onKeyDown={e => e.key === "Enter" && addParticipant()} placeholder="الاسم الكامل" /></Field>
             <Field label="رقم الهاتف (اختياري)"><Inp value={pf.phone} onChange={e => setPf({ ...pf, phone: e.target.value })} placeholder="0913-000-000" /></Field>
-            <Btn gold onClick={addParticipant} style={{ width: "100%", justifyContent: "center", marginBottom: 10 }}>+ إضافة للقائمة</Btn>
+            {t.feeAmount > 0 && (
+              <Field label={`طريقة دفع رسم الاشتراك (${t.feeAmount} ${cur})`}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
+                  {["كاش", "بطاقة", "تحويل"].map(m => (
+                    <div key={m} onClick={() => setPf({ ...pf, pay: m })} style={{ border: `1px solid ${pf.pay === m ? C.gold : C.bc}`, borderRadius: 8, padding: ".4rem", textAlign: "center", cursor: "pointer", fontSize: 12, fontWeight: pf.pay === m ? 700 : 500, background: pf.pay === m ? C.gold + "14" : C.crm }}>{m}</div>
+                  ))}
+                </div>
+              </Field>
+            )}
+            <Btn gold onClick={addParticipant} style={{ width: "100%", justifyContent: "center", marginBottom: 10 }}>+ إضافة للقائمة{t.feeAmount > 0 ? ` (${t.feeAmount} ${cur})` : ""}</Btn>
             <Btn onClick={startDraw} style={{ width: "100%", justifyContent: "center", background: "linear-gradient(135deg,#1a8c3e,#146830)", color: "#fff", border: "none" }}>🎲 إجراء القرعة وبدء الدوري</Btn>
           </Card>
           <Card>
