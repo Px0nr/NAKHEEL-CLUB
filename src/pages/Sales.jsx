@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { PageTop, Card, CardHead, KCard, Table, Badge, Btn, Modal, Sel, inputStyle } from "../components/ui.jsx";
 import { openPdfDoc } from "../components/pdfHook.js";
-import { arDate, todayISO } from "../utils/format.js";
+import { arDate, todayISO, overdueDays } from "../utils/format.js";
 import { applyReversal } from "../utils/invoiceReversal.js";
 import { computeReturn, applyReturnToInvoice } from "../utils/invoiceReturn.js";
 import { rangePreset, QUICK_RANGES } from "../utils/analytics.js";
 import { downloadCsv, downloadExcel } from "../utils/exportTable.js";
+import { payBreakdown } from "../utils/payments.js";
+import CustomerDetail from "./CustomerDetail.jsx";
 import { DB } from "../db/db.js";
 
 /* ============================ SALES ============================ */
@@ -15,6 +17,11 @@ export default function Sales({ ctx, can }) {
   const cur = ctx.settings?.currency || "د.ل";
   const [q, setQ] = useState(() => (ctx.searchIntent && ctx.searchIntent.type === "invoice") ? ctx.searchIntent.query : "");
   const [filter, setFilter] = useState("all");
+  const [payFilter, setPayFilter] = useState("all"); // فلترة إضافية بطريقة الدفع — لم تكن موجودة
+  const [srcFilter, setSrcFilter] = useState("all"); // فلترة إضافية بمصدر الفاتورة — لم تكن موجودة
+  const [sortKey, setSortKey] = useState(null); // null | "total" | "date"
+  const [sortDir, setSortDir] = useState("desc");
+  const [custDetail, setCustDetail] = useState(null); // ملف الزبون المفتوح من داخل تفاصيل فاتورة
   // النطاق الزمني فارغ افتراضياً = كل الفواتير (السلوك السابق)، فلا يُفاجأ المستخدم
   // بسجل مقصوص عند فتح الصفحة
   const [from, setFrom] = useState("");
@@ -44,18 +51,49 @@ export default function Sales({ ctx, can }) {
   };
   const shown = invoices.filter(i =>
     (filter === "all" || i.status === filter) &&
+    (payFilter === "all" || (payFilter === "split" ? (Array.isArray(i.payParts) && i.payParts.length > 0) : i.pay === payFilter)) &&
+    (srcFilter === "all" || i.source === srcFilter) &&
     (!from || i.date >= from) && (!to || i.date <= to) &&
     matchesQuery(i)
   );
-  const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  // فرز اختياري بالضغط على رأس عمود «الإجمالي»/«التاريخ» — كان الترتيب ثابتاً
+  // بترتيب الإدخال (الأحدث أولاً) بلا طريقة لرؤية أكبر فاتورة أولاً مثلاً
+  const sortVal = (i) => sortKey === "total" ? i.total : sortKey === "date" ? new Date(i.date + "T" + (i.time || "00:00")).getTime() : 0;
+  const sortedShown = sortKey ? [...shown].sort((a, b) => (sortVal(a) - sortVal(b)) * (sortDir === "asc" ? 1 : -1)) : shown;
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
+  };
+  const sortArrow = (key) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕";
+  const totalPages = Math.max(1, Math.ceil(sortedShown.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
-  const pageRows = shown.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
+  const pageRows = sortedShown.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
   // المؤشرات تتبع ما هو معروض فعلاً: كانت تجمع كل تاريخ النظام فتفقد معناها
   // بعد أشهر من التشغيل، ولا تتأثر بأي فلتر يختاره المستخدم
   const shownPaid = shown.filter(i => i.status === "مدفوعة");
   const shownSales = shownPaid.reduce((s, i) => s + i.total, 0);
   const applyQuickRange = (key) => { const r = rangePreset(key); setFrom(r.from); setTo(r.to); setPage(1); };
-  const clearFilters = () => { setFrom(""); setTo(""); setQ(""); setFilter("all"); setPage(1); };
+  const clearFilters = () => { setFrom(""); setTo(""); setQ(""); setFilter("all"); setPayFilter("all"); setSrcFilter("all"); setPage(1); };
+
+  // حالة الفاتورة الفعلية: فاتورة آجلة معلَّقة تجاوزت موعد الاستحقاق تُعرض
+  // «متأخرة» بلون أحمر بدل «معلقة» الكهرمانية العامة نفسها لكل الحالات المعلّقة
+  const statusLabel = (i) => overdueDays(i) > 0 ? "متأخرة" : i.status;
+  const statusTone = (i) => i.status === "مدفوعة" ? "g" : i.status === "ملغاة" ? "r" : overdueDays(i) > 0 ? "r" : "a";
+
+  // توزيع طرق الدفع ضمن الفترة المعروضة — يفكّك الفواتير المقسَّمة عبر
+  // payBreakdown كي لا تُحتسب فاتورة نصفها كاش ونصفها بطاقة كلها لطريقة واحدة
+  const payTotals = useMemo(() => {
+    const totals = {};
+    shownPaid.forEach(i => payBreakdown(i).forEach(p => { totals[p.method] = (totals[p.method] || 0) + p.amount; }));
+    return totals;
+  }, [shownPaid]);
+
+  // سجل مرتجعات موحَّد عبر كل الفواتير المعروضة — كانت المرتجعات لا تظهر إلا
+  // داخل تفاصيل كل فاتورة على حدة بلا أي رؤية إجمالية لفترة معينة
+  const allReturns = useMemo(() => shown.flatMap(i => (i.returns || []).map((r, idx) => ({
+    key: `${i.id}-${idx}`, invId: i.id, customer: i.customer, ...r,
+  }))).sort((a, b) => b.date.localeCompare(a.date)), [shown]);
+  const totalReturned = allReturns.reduce((s, r) => s + r.amount, 0);
 
   // التصدير يتبع الفلاتر الحالية — تصدير كل شيء دائماً يجعل الفلترة بلا فائدة
   const exportSheet = () => [{
@@ -153,13 +191,34 @@ export default function Sales({ ctx, can }) {
         <KCard label="مبيعات الفترة المعروضة" value={fmt(shownSales)} sub={cur} bar="#1a8c3e" />
         <KCard label="عدد الفواتير" value={fmt(shown.length)} sub={`من ${fmt(invoices.length)} إجمالاً`} bar="#2a78d6" />
         <KCard label="متوسط الفاتورة" value={shownPaid.length ? fmt(Math.round(shownSales / shownPaid.length)) : 0} sub={cur} bar={C.gold} />
+        <KCard label="إجمالي المرتجعات" value={fmt(totalReturned)} sub={`${cur} — ${allReturns.length} عملية`} bar={C.red} />
       </div>
+      {Object.keys(payTotals).length > 0 && (
+        <Card style={{ marginBottom: "1.1rem" }}>
+          <CardHead title="توزيع طرق الدفع" sub="الفترة المعروضة — مهم لتسوية الصندوق اليومية" />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {Object.entries(payTotals).map(([method, amount]) => (
+              <div key={method} style={{ background: C.crm, borderRadius: 10, padding: ".55rem .9rem", minWidth: 120 }}>
+                <div style={{ fontSize: 11, color: C.mt }}>{method}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: C.grn2 }}>{fmt(amount)} {cur}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       <Card>
         <CardHead title="سجل الفواتير" sub={`الفواتير من الحجوزات تظهر بعلامة (حجز) — ${fmt(shown.length)} فاتورة مطابقة — اضغط أي صف لعرض التفاصيل`} right={
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="بحث باسم زبون أو صنف أو رقم..." style={{ ...inputStyle, width: 210 }} />
             <Sel value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }} style={{ width: 110 }}>
               <option value="all">كل الحالات</option><option value="مدفوعة">مدفوعة</option><option value="معلقة">معلقة</option><option value="ملغاة">ملغاة</option>
+            </Sel>
+            <Sel value={payFilter} onChange={e => { setPayFilter(e.target.value); setPage(1); }} style={{ width: 110 }}>
+              <option value="all">كل طرق الدفع</option><option value="كاش">كاش</option><option value="بطاقة">بطاقة</option><option value="تحويل">تحويل</option><option value="آجل">آجل</option><option value="موظف">موظف</option><option value="split">مقسَّم</option>
+            </Sel>
+            <Sel value={srcFilter} onChange={e => { setSrcFilter(e.target.value); setPage(1); }} style={{ width: 110 }}>
+              <option value="all">كل المصادر</option>
+              {Object.keys(SRC_TONE).map(s => <option key={s} value={s}>{s}</option>)}
             </Sel>
           </div>
         } />
@@ -172,12 +231,18 @@ export default function Sales({ ctx, can }) {
           </Sel>
           <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} aria-label="من تاريخ" style={{ ...inputStyle, width: 145 }} />
           <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} aria-label="إلى تاريخ" style={{ ...inputStyle, width: 145 }} />
-          {(from || to || q || filter !== "all") && <Btn sm onClick={clearFilters}>✕ مسح الفلاتر</Btn>}
+          {(from || to || q || filter !== "all" || payFilter !== "all" || srcFilter !== "all") && <Btn sm onClick={clearFilters}>✕ مسح الفلاتر</Btn>}
           <div style={{ flex: 1 }} />
           <Btn sm onClick={() => downloadCsv(exportSheet(), exportName())}>⬇ تصدير CSV</Btn>
           <Btn sm onClick={() => downloadExcel(exportSheet(), exportName())}>📊 تصدير Excel</Btn>
         </div>
-        <Table cols={[{ h: "رقم", w: "13%" }, { h: "الزبون", w: "16%" }, { h: "التاريخ", w: "12%" }, { h: "المصدر", w: "11%" }, { h: "التفاصيل", w: "16%" }, { h: "الدفع", w: "10%" }, { h: "الإجمالي", w: "11%" }, { h: "الحالة", w: "11%" }]}
+        <Table cols={[
+          { h: "رقم", w: "13%" }, { h: "الزبون", w: "15%" },
+          { h: <span onClick={() => toggleSort("date")} style={{ cursor: "pointer", userSelect: "none" }} title="فرز حسب التاريخ">التاريخ{sortArrow("date")}</span>, w: "11%" },
+          { h: "المصدر", w: "10%" }, { h: "التفاصيل", w: "15%" }, { h: "الدفع", w: "9%" },
+          { h: <span onClick={() => toggleSort("total")} style={{ cursor: "pointer", userSelect: "none" }} title="فرز حسب الإجمالي">الإجمالي{sortArrow("total")}</span>, w: "11%" },
+          { h: "الحالة", w: "11%" },
+        ]}
           rows={pageRows.map(i => [
             <span onClick={() => setDetail(i)} style={{ cursor: "pointer", fontWeight: 600, color: C.blue }}>#{i.id}</span>,
             <span onClick={() => setDetail(i)} style={{ cursor: "pointer" }}>{i.customer}</span>,
@@ -187,7 +252,7 @@ export default function Sales({ ctx, can }) {
             <Badge tone={PAY_TONE[i.pay] || "g"}>{i.pay}</Badge>,
             fmt(i.total) + " " + cur,
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <Badge tone={i.status === "مدفوعة" ? "g" : i.status === "ملغاة" ? "r" : "a"}>{i.status}</Badge>
+              <Badge tone={statusTone(i)}>{statusLabel(i)}</Badge>
               <button onClick={() => setDetail(i)} title="عرض التفاصيل" style={{ background: "none", border: "none", cursor: "pointer", color: C.blue, fontSize: 13 }}>👁</button>
             </span>,
           ])} />
@@ -201,13 +266,37 @@ export default function Sales({ ctx, can }) {
         )}
       </Card>
 
+      {/* سجل مرتجعات موحَّد — يجمع مرتجعات كل الفواتير المعروضة بدل الاضطرار
+          لفتح كل فاتورة على حدة لمعرفة ما أُرجِع منها */}
+      {allReturns.length > 0 && (
+        <Card style={{ marginTop: 11 }}>
+          <CardHead title="↩ سجل المرتجعات" sub={`${allReturns.length} عملية — إجمالي ${fmt(totalReturned)} ${cur} ضمن النطاق المعروض`} />
+          <Table cols={[{ h: "التاريخ", w: "14%" }, { h: "الفاتورة", w: "13%" }, { h: "الزبون", w: "18%" }, { h: "الأصناف", w: "38%" }, { h: "القيمة", w: "17%" }]}
+            rows={allReturns.slice(0, 50).map(r => [
+              arDate(r.date), <span onClick={() => setDetail(invoices.find(i => i.id === r.invId))} style={{ cursor: "pointer", color: C.blue, fontWeight: 600 }}>#{r.invId}</span>,
+              r.customer, r.lines.map(l => `${l.name} ×${l.qty}`).join("، "), <span style={{ fontWeight: 700, color: C.red }}>-{fmt(r.amount)} {cur}</span>,
+            ])} />
+          {allReturns.length > 50 && <div style={{ fontSize: 11, color: C.mt, textAlign: "center", marginTop: 8 }}>يعرض أحدث 50 من {fmt(allReturns.length)} — ضيّق النطاق الزمني لرؤية البقية</div>}
+        </Card>
+      )}
+
       {/* نافذة تفاصيل الفاتورة */}
       {detail && (
         <Modal title={`فاتورة #${detail.id}`} onClose={() => setDetail(null)} width={560}>
           <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-            <div><div style={{ fontSize: 11, color: C.mt }}>الزبون</div><div style={{ fontSize: 14, fontWeight: 700 }}>{detail.customer}</div></div>
+            <div>
+              <div style={{ fontSize: 11, color: C.mt }}>الزبون</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>{detail.customer}</div>
+                <button onClick={() => {
+                  const cust = ctx.customers.find(c => detail.customerId != null ? c.id === detail.customerId : c.name === detail.customer);
+                  if (!cust) { ctx.showToast("لا يوجد ملف زبون مسجَّل بهذا الاسم"); return; }
+                  setCustDetail(cust);
+                }} title="فتح ملف الزبون" style={{ background: "none", border: "none", cursor: "pointer", color: C.blue, fontSize: 13 }}>👤</button>
+              </div>
+            </div>
             <div><div style={{ fontSize: 11, color: C.mt }}>التاريخ</div><div style={{ fontSize: 14, fontWeight: 700 }}>{arDate(detail.date)}{detail.time ? " — " + detail.time : ""}</div></div>
-            <div><div style={{ fontSize: 11, color: C.mt }}>الحالة</div><Badge tone={detail.status === "مدفوعة" ? "g" : detail.status === "ملغاة" ? "r" : "a"}>{detail.status}</Badge></div>
+            <div><div style={{ fontSize: 11, color: C.mt }}>الحالة</div><Badge tone={statusTone(detail)}>{statusLabel(detail)}</Badge></div>
           </div>
 
           {detail.items && detail.items.length > 0 ? (
@@ -224,6 +313,7 @@ export default function Sales({ ctx, can }) {
               <div key={n} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: C.mt }}>— {pt.method}</span><span>{fmt(pt.amount)} {cur}</span></div>
             ))}
             {detail.discount && detail.discount !== "—" && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>الخصم</span><span>{detail.discount}</span></div>}
+            {detail.coupon && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>الكوبون المستخدم</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>{detail.coupon}</span></div>}
             {detail.dueDate && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>تاريخ الاستحقاق</span><span>{arDate(detail.dueDate)}</span></div>}
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>بواسطة</span><span>{detail.by || "—"}</span></div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800, gridColumn: "1/-1", borderTop: `0.5px solid ${C.bc}`, paddingTop: 8, marginTop: 4 }}><span>الإجمالي</span><span style={{ color: C.grn2 }}>{fmt(detail.total)} {cur}</span></div>
@@ -283,6 +373,7 @@ export default function Sales({ ctx, can }) {
           </Modal>
         );
       })()}
+      {custDetail && <CustomerDetail ctx={ctx} customer={custDetail} onClose={() => setCustDetail(null)} />}
     </>
   );
 }
