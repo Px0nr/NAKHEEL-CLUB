@@ -8,6 +8,7 @@ import NewCustomerModal from "../components/NewCustomerModal.jsx";
 import { openPdfDoc } from "../components/pdfHook.js";
 import { todayISO, matchesBarcode, matchesBarcodePartial } from "../utils/format.js";
 import { promoFor } from "../utils/promos.js";
+import { applyReversal } from "../utils/invoiceReversal.js";
 
 const qbtn = { width: 22, height: 22, borderRadius: 6, border: `0.5px solid ${C.bc}`, background: C.crm, cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
 const posUnitBtn = (primary) => ({ flex: 1, padding: ".28rem .3rem", borderRadius: 6, fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${primary ? C.gold : C.bc}`, background: primary ? C.gold + "18" : C.crm, color: primary ? C.gdd : C.k2, whiteSpace: "nowrap" });
@@ -226,7 +227,10 @@ export default function POS({ ctx, can, go }) {
     }, 0);
     const loyaltyEarned = (settings?.loyaltyOn && custForPoints) ? Math.floor(total / (settings.pointsPerCurrency || 10)) : 0;
     const loyaltyRedeemed = (settings?.loyaltyOn && custForPoints) ? redeemBlocks * 100 : 0;
-    const inv = { id: num, customer: custName, customerId: custId, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), pay: PAY_LABEL[pay], discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}) };
+    // pieces: عدد القطع المخصومة فعلاً من المخزون لهذا السطر (qty قد يكون بالعلبة).
+    // بدونه لا يستطيع إلغاء الفاتورة لاحقاً من سجل المبيعات إعادة الكمية الصحيحة —
+    // انظر utils/invoiceReversal.js
+    const inv = { id: num, customer: custName, customerId: custId, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, pieces: it.qty * it.perPieces, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), loyaltyEarned, loyaltyRedeemed, pay: PAY_LABEL[pay], discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}) };
     setInvoices(iv => [inv, ...iv]);
     showToast(pay === "defer" ? `فاتورة آجلة #${num} على ${custName} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}` : pay === "employee" ? `فاتورة موظف #${num} على ${custName} — ${fmt(total)} ${cur}${freeValue > 0 ? ` (مزايا مجانية ${fmt(freeValue)} ${cur})` : ""}` : `تم إنشاء الفاتورة #${num} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}`);
     setLastSale({ invoice: inv, stockDeltas, isDefer: pay === "defer", deferCustId: pay === "defer" ? deferCustomer.id : null, loyaltyCustId: custForPoints ? custForPoints.id : null, loyaltyEarned, loyaltyRedeemed });
@@ -247,21 +251,12 @@ export default function POS({ ctx, can, go }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // تراجع عن آخر عملية بيع فقط (أحدث فاتورة) — يعكس خصم المخزون ودَين الزبون الآجل ونقاط الولاء ثم يحذف الفاتورة
+  // تراجع عن آخر عملية بيع فقط (أحدث فاتورة) — يعكس خصم المخزون ودَين الزبون الآجل ونقاط الولاء ثم يحذف الفاتورة.
+  // العكس نفسه في utils/invoiceReversal.js ليتطابق مع إلغاء/حذف الفاتورة من سجل المبيعات بدل منطقَين منفصلين
   const undoLastSale = async () => {
     if (!lastSale) return;
     if (!(await ctx.confirm(`التراجع عن الفاتورة #${lastSale.invoice.id} نهائياً؟ سيُعاد المخزون المخصوم وأي دين أو نقاط ولاء مرتبطة بها.`, { danger: true }))) return;
-    setProducts(ps => ps.map(p => lastSale.stockDeltas[p.id] && p.stock !== null ? { ...p, stock: p.stock + lastSale.stockDeltas[p.id] } : p));
-    if (lastSale.isDefer && lastSale.deferCustId != null) {
-      setCustomers(cs => cs.map(c => c.id === lastSale.deferCustId
-        ? { ...c, debt: Math.max(0, (c.debt || 0) - lastSale.invoice.total), total: Math.max(0, c.total - lastSale.invoice.total), invoices: Math.max(0, c.invoices - 1) }
-        : c));
-    }
-    if (lastSale.loyaltyCustId != null && (lastSale.loyaltyEarned || lastSale.loyaltyRedeemed)) {
-      setCustomers(cs => cs.map(c => c.id === lastSale.loyaltyCustId
-        ? { ...c, points: Math.max(0, (c.points || 0) - lastSale.loyaltyEarned + lastSale.loyaltyRedeemed) }
-        : c));
-    }
+    applyReversal(lastSale.invoice, { setProducts, setCustomers });
     setInvoices(iv => iv.filter(i => i.id !== lastSale.invoice.id));
     showToast(`تم التراجع عن الفاتورة #${lastSale.invoice.id}`);
     setLastSale(null);

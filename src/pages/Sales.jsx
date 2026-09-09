@@ -3,11 +3,12 @@ import { C, fmt } from "../constants/theme.js";
 import { PageTop, Card, CardHead, KCard, Table, Badge, Btn, Modal, Sel, inputStyle } from "../components/ui.jsx";
 import { openPdfDoc } from "../components/pdfHook.js";
 import { arDate, todayISO } from "../utils/format.js";
+import { applyReversal } from "../utils/invoiceReversal.js";
 import { DB } from "../db/db.js";
 
 /* ============================ SALES ============================ */
 export default function Sales({ ctx, can }) {
-  const { invoices, setInvoices, confirm } = ctx;
+  const { invoices, setInvoices, setProducts, setCustomers, confirm } = ctx;
   const cur = ctx.settings?.currency || "د.ل";
   const [q, setQ] = useState(() => (ctx.searchIntent && ctx.searchIntent.type === "invoice") ? ctx.searchIntent.query : "");
   const [filter, setFilter] = useState("all");
@@ -30,17 +31,39 @@ export default function Sales({ ctx, can }) {
   const pageSafe = Math.min(page, totalPages);
   const pageRows = shown.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
   const monthSales = invoices.filter(i => i.status === "مدفوعة").reduce((s, i) => s + i.total, 0);
-  const cancel = (id) => { if (!can("cancel")) return; setInvoices(iv => iv.map(i => i.id === id ? { ...i, status: "ملغاة" } : i)); setDetail(null); };
+  // رسالة تُلحق بالتأكيد حين تكون الفاتورة قديمة (بلا حقل pieces) فقد يكون عدد
+  // القطع المُعادة تقريبياً — الشفافية هنا أفضل من عكسٍ صامت بأرقام قد تكون خاطئة
+  const reversalNote = (inv) => {
+    const approx = (inv?.items || []).some(it => it.pid != null && it.pieces == null);
+    return approx ? "\n\nتنبيه: هذه فاتورة قديمة لا تحمل تفصيل عدد القطع، فقد تكون الكمية المُعادة للمخزون تقريبية — راجع المخزون بعدها." : "";
+  };
+
+  // الإلغاء يعكس أثر الفاتورة (مخزون، دَين، نقاط) ويُبقيها ظاهرة في السجل بحالة «ملغاة».
+  // كان سابقاً يغيّر كلمة الحالة فقط فتبقى البضاعة مخصومة والدَين على الزبون.
+  const cancel = async (id) => {
+    if (!can("cancel")) return;
+    const inv = invoices.find(i => i.id === id);
+    if (!inv) return;
+    if (!(await confirm(`إلغاء الفاتورة #${inv.id}؟\n\nسيُعاد المخزون المخصوم، ويُخصم أي دين أو نقاط ولاء نتجت عنها. تبقى الفاتورة في السجل بحالة «ملغاة».${reversalNote(inv)}`, { danger: true }))) return;
+    applyReversal(inv, { setProducts, setCustomers });
+    setInvoices(iv => iv.map(i => i.id === id ? { ...i, status: "ملغاة" } : i));
+    ctx.setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: ctx.user?.name || "—", type: "إلغاء فاتورة", detail: `#${inv.id} — ${inv.customer} — ${fmt(inv.total)} ${cur}` }, ...al]);
+    DB.flush("invoices"); DB.flush("auditLog");
+    ctx.showToast(`أُلغيت الفاتورة #${inv.id} وأُعيد أثرها`);
+    setDetail(null);
+  };
   const deleteInvoice = async (id) => {
     if (!can("cancel")) return;
-    if (!(await confirm("حذف هذه الفاتورة نهائياً من السجل؟\n\nهذا مختلف عن «الإلغاء» — الحذف يزيل الفاتورة تماماً ولا يمكن التراجع عنه، ولن تظهر بعدها في أي تقرير. استخدمه فقط لتصحيح خطأ إدخال حقيقي (كفاتورة مكرَّرة بالخطأ).", { danger: true }))) return;
     const inv = invoices.find(i => i.id === id);
+    if (!inv) return;
+    // الفاتورة الملغاة سبق أن عُكس أثرها عند الإلغاء، فلا يُعكس مرتين (applyReversal يحرس ذلك أيضاً)
+    const alreadyReversed = inv.status === "ملغاة";
+    if (!(await confirm(`حذف هذه الفاتورة نهائياً من السجل؟\n\nهذا مختلف عن «الإلغاء» — الحذف يزيل الفاتورة تماماً ولا يمكن التراجع عنه، ولن تظهر بعدها في أي تقرير. استخدمه فقط لتصحيح خطأ إدخال حقيقي (كفاتورة مكرَّرة بالخطأ).${alreadyReversed ? "\n\nهذه الفاتورة ملغاة أصلاً وقد أُعيد أثرها، فلن يتغيّر المخزون أو الدَين." : `\n\nسيُعاد المخزون المخصوم، ويُخصم أي دين أو نقاط ولاء نتجت عنها.${reversalNote(inv)}`}`, { danger: true }))) return;
+    applyReversal(inv, { setProducts, setCustomers });
     setInvoices(iv => iv.filter(i => i.id !== id));
     DB.flush("invoices");
-    if (inv) {
-      ctx.setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: ctx.user?.name || "—", type: "حذف فاتورة", detail: `#${inv.id} — ${inv.customer} — ${fmt(inv.total)} ${cur}` }, ...al]);
-      DB.flush("auditLog");
-    }
+    ctx.setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: ctx.user?.name || "—", type: "حذف فاتورة", detail: `#${inv.id} — ${inv.customer} — ${fmt(inv.total)} ${cur}` }, ...al]);
+    DB.flush("auditLog");
     ctx.showToast("تم حذف الفاتورة نهائياً");
     setDetail(null);
   };
