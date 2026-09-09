@@ -4,6 +4,7 @@ import { PageTop, Card, CardHead, KCard, Table, Badge, Btn, Modal, Sel, inputSty
 import { openPdfDoc } from "../components/pdfHook.js";
 import { arDate, todayISO } from "../utils/format.js";
 import { applyReversal } from "../utils/invoiceReversal.js";
+import { computeReturn, applyReturnToInvoice } from "../utils/invoiceReturn.js";
 import { rangePreset, QUICK_RANGES } from "../utils/analytics.js";
 import { downloadCsv, downloadExcel } from "../utils/exportTable.js";
 import { DB } from "../db/db.js";
@@ -19,6 +20,9 @@ export default function Sales({ ctx, can }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
+  // إرجاع جزئي: { [فهرس السطر]: الكمية } — تُفتح لفاتورة واحدة في كل مرة
+  const [returnFor, setReturnFor] = useState(null);
+  const [returnQtys, setReturnQtys] = useState({});
   const [detail, setDetail] = useState(() => {
     if (ctx.searchIntent && ctx.searchIntent.type === "invoice") {
       return (ctx.invoices || []).find(i => i.id === ctx.searchIntent.id) || null;
@@ -96,6 +100,42 @@ export default function Sales({ ctx, can }) {
     ctx.showToast("تم حذف الفاتورة نهائياً");
     setDetail(null);
   };
+  // الإرجاع يخفّض الفاتورة نفسها ويعيد المخزون ويصحّح حساب الزبون — انظر
+  // utils/invoiceReturn.js. إبقاء الفاتورة مصدرَ قيمتها الصافية يُبقي كل
+  // التقارير صحيحة بلا أن يطرح كل تقرير المرتجعات بنفسه
+  const submitReturn = async () => {
+    const inv = returnFor;
+    const plan = computeReturn(inv, returnQtys, ctx.products);
+    if (plan.refund <= 0) { ctx.showToast("حدّد كمية للإرجاع أولاً"); return; }
+    const msg = plan.fullyReturned
+      ? `إرجاع كل أصناف الفاتورة #${inv.id} بقيمة ${fmt(plan.refund)} ${cur}؟
+
+ستُعتبر الفاتورة ملغاة بعدها.`
+      : `إرجاع ${plan.lines.length} صنف من الفاتورة #${inv.id} بقيمة ${fmt(plan.refund)} ${cur}؟
+
+سيُعاد المخزون ويُخفَّض إجمالي الفاتورة إلى ${fmt(plan.nextTotal)} ${cur}.`;
+    if (!(await confirm(msg, { danger: true }))) return;
+
+    if (Object.keys(plan.stock).length) {
+      setProducts(ps => ps.map(p => (plan.stock[p.id] && p.stock !== null) ? { ...p, stock: p.stock + plan.stock[p.id] } : p));
+    }
+    if (plan.customer) {
+      const adj = plan.customer;
+      setCustomers(cs => cs.map(c => c.id === adj.id ? {
+        ...c,
+        debt: Math.max(0, (c.debt || 0) + adj.debtDelta),
+        total: Math.max(0, (c.total || 0) + adj.totalDelta),
+        points: Math.max(0, (c.points || 0) + adj.pointsDelta),
+      } : c));
+    }
+    const updated = applyReturnToInvoice(inv, plan, { by: ctx.user?.name || "—", date: todayISO() });
+    setInvoices(iv => iv.map(i => i.id === inv.id ? updated : i));
+    ctx.setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: ctx.user?.name || "—", type: "إرجاع أصناف", detail: `#${inv.id} — ${plan.lines.map(l => `${l.name} ×${l.qty}`).join("، ")} — ${fmt(plan.refund)} ${cur}` }, ...al]);
+    DB.flush("invoices"); DB.flush("auditLog");
+    ctx.showToast(`تم إرجاع ${fmt(plan.refund)} ${cur} من الفاتورة #${inv.id}`);
+    setReturnFor(null); setReturnQtys({}); setDetail(updated);
+  };
+
   const printInvoice = (i) => {
     openPdfDoc(ctx.settings, {
       title: "فاتورة مبيعات", recipientLabel: "الزبون", recipientName: i.customer,
@@ -189,13 +229,60 @@ export default function Sales({ ctx, can }) {
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800, gridColumn: "1/-1", borderTop: `0.5px solid ${C.bc}`, paddingTop: 8, marginTop: 4 }}><span>الإجمالي</span><span style={{ color: C.grn2 }}>{fmt(detail.total)} {cur}</span></div>
           </div>
 
+          {(detail.returns || []).length > 0 && (
+            <div style={{ marginTop: 12, background: C.redbg, border: `0.5px solid ${C.red}44`, borderRadius: 10, padding: ".7rem .9rem" }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: C.red, marginBottom: 5 }}>↩ مرتجعات هذه الفاتورة</div>
+              {detail.returns.map((r, n) => (
+                <div key={n} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: C.k2, marginBottom: 3 }}>
+                  <span>{arDate(r.date)} — {r.lines.map(l => `${l.name} ×${l.qty}`).join("، ")}</span>
+                  <span style={{ fontWeight: 700 }}>-{fmt(r.amount)} {cur}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
             <Btn gold onClick={() => printInvoice(detail)}>🖨 طباعة</Btn>
+            {can("cancel") && detail.status !== "ملغاة" && (detail.items || []).length > 0 &&
+              <Btn onClick={() => { setReturnFor(detail); setReturnQtys({}); }}>↩ إرجاع أصناف</Btn>}
             {can("cancel") && detail.status !== "ملغاة" && <Btn onClick={() => cancel(detail.id)}>✕ إلغاء الفاتورة</Btn>}
             {can("cancel") && <Btn danger onClick={() => deleteInvoice(detail.id)}>🗑 حذف نهائياً</Btn>}
           </div>
         </Modal>
       )}
+      {/* نافذة الإرجاع الجزئي — تُعرض فوق تفاصيل الفاتورة */}
+      {returnFor && (() => {
+        const plan = computeReturn(returnFor, returnQtys, ctx.products);
+        return (
+          <Modal title={`إرجاع أصناف — فاتورة #${returnFor.id}`} onClose={() => { setReturnFor(null); setReturnQtys({}); }} width={520}>
+            <div style={{ fontSize: 12, color: C.mt, marginBottom: 10 }}>حدّد الكمية المُرجَعة من كل صنف. المبلغ يُحسب بالتناسب مع سعر السطر بعد أي خصم.</div>
+            {(returnFor.items || []).map((it, idx) => (
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: ".5rem 0", borderBottom: `0.5px solid ${C.bc}` }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>{it.name}</div>
+                  <div style={{ fontSize: 11, color: C.mt }}>{it.qty} × {fmt((it.lineTotal || 0) / (it.qty || 1))} {cur}</div>
+                </div>
+                <input type="number" min="0" max={it.qty} value={returnQtys[idx] ?? ""} placeholder="0"
+                  onChange={e => setReturnQtys(q => ({ ...q, [idx]: e.target.value }))}
+                  aria-label={`الكمية المُرجَعة من ${it.name}`} style={{ ...inputStyle, width: 80, textAlign: "center" }} />
+                <Btn sm onClick={() => setReturnQtys(q => ({ ...q, [idx]: it.qty }))}>الكل</Btn>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, background: C.crm, borderRadius: 10, padding: ".8rem 1rem" }}>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>قيمة الإرجاع</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: plan.refund > 0 ? C.red : C.mt }}>{fmt(plan.refund)} {cur}</span>
+            </div>
+            {plan.refund > 0 && (
+              <div style={{ fontSize: 11.5, color: C.mt, marginTop: 6 }}>
+                {plan.fullyReturned ? "سيُرجَّع كل محتوى الفاتورة وتُصبح ملغاة." : `إجمالي الفاتورة بعد الإرجاع: ${fmt(plan.nextTotal)} ${cur}`}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <Btn danger onClick={submitReturn} style={{ flex: 1, justifyContent: "center" }}>↩ تأكيد الإرجاع</Btn>
+              <Btn onClick={() => { setReturnFor(null); setReturnQtys({}); }} style={{ flex: 1, justifyContent: "center" }}>إلغاء</Btn>
+            </div>
+          </Modal>
+        );
+      })()}
     </>
   );
 }
