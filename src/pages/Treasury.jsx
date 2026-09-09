@@ -3,16 +3,26 @@ import { C, fmt } from "../constants/theme.js";
 import { PageTop, Badge, KCard, Card, CardHead, Field, Inp, Sel, Btn, Table } from "../components/ui.jsx";
 import { todayISO, arDate } from "../utils/format.js";
 import { payBreakdown } from "../utils/payments.js";
+import { rangePreset, QUICK_RANGES } from "../utils/analytics.js";
+import { downloadCsv, downloadExcel } from "../utils/exportTable.js";
+import { openPdfDoc } from "../components/pdfHook.js";
 import { DB } from "../db/db.js";
 
 /* ============================ TREASURY (الخزينة والإغلاق اليومي) ============================ */
 export default function Treasury({ ctx }) {
-  const { invoices, purchases, expenses, payments, closings, setClosings, users, user, showToast } = ctx;
+  const { invoices, purchases, expenses, payments, closings, setClosings, employees, setDeductions, user, showToast, confirm } = ctx;
   const cur = ctx.settings?.currency || "د.ل";
   const [period, setPeriod] = useState("today"); // today | 7 | 30
   const [actual, setActual] = useState({ cash: "", card: "", transfer: "" });
-  const [assignTo, setAssignTo] = useState("");
+  const [assignTo, setAssignTo] = useState(""); // معرّف موظف من قائمة «الموظفين» — لا اسم مستخدم كما كان
   const [note, setNote] = useState("");
+  // فلترة/تصدير/صفحات سجل الإغلاقات — كان يعرض كل السجل دفعة واحدة بلا حدّ
+  const [clFrom, setClFrom] = useState("");
+  const [clTo, setClTo] = useState("");
+  const [clPage, setClPage] = useState(1);
+  const CL_PAGE_SIZE = 50;
+  const clApplyQuickRange = (key) => { const r = rangePreset(key); setClFrom(r.from); setClTo(r.to); setClPage(1); };
+  const activeEmployees = (employees || []).filter(e => e.status === "نشط");
 
   const normPay = (p) => p === "نقداً" ? "كاش" : p;
   const today = todayISO();
@@ -72,41 +82,91 @@ export default function Treasury({ ctx }) {
 
   const saveClosing = () => {
     if (actual.cash === "" && actual.card === "" && actual.transfer === "") { showToast("أدخل المبالغ الفعلية المعدودة"); return; }
-    if (diff < 0 && !assignTo) { showToast("يوجد عجز — اختر المستخدم المسؤول لتسجيله عليه"); return; }
+    if (diff < 0 && !assignTo) { showToast("يوجد عجز — اختر الموظف المسؤول لتسجيله عليه"); return; }
     const status = diff === 0 ? "match" : diff < 0 ? "shortage" : "surplus";
+    const emp = diff < 0 ? activeEmployees.find(e => String(e.id) === String(assignTo)) : null;
+    // عجز الخزينة كان اسماً حراً بلا أي ربط بنظام خصومات الرواتب — يُنشأ الآن
+    // خصم فعلي على الموظف نفسه (deductions) بدل رقم تراكمي منفصل يتطلب إدخالاً
+    // يدوياً مكرراً في صفحة الرواتب
+    let deductionId = null;
+    if (emp) {
+      deductionId = "DD-" + Date.now();
+      setDeductions(ds => [{ id: deductionId, empId: emp.id, empName: emp.name, date: closeDate, amount: Math.abs(diff), reason: "عجز خزينة", note: `إغلاق يوم ${arDate(closeDate)}${note.trim() ? ` — ${note.trim()}` : ""}`, by: user.name }, ...ds]);
+    }
     setClosings(cs => [{
       id: "CL-" + Date.now(), date: closeDate,
       expected: { ...expected.net, total: expected.netTotal },
       actual: { ...actualNum, total: actualTotal },
       diff, status,
-      assignedTo: diff < 0 ? assignTo : null,
+      assignedTo: emp?.name || null, assignedEmpId: emp?.id ?? null, deductionId,
       note: note.trim() || null,
       closedBy: user.name, closedAt: new Date().toISOString(),
     }, ...cs]);
-    DB.flush("closings");
+    DB.flush("closings"); DB.flush("deductions");
     /* الإغلاق اليومي نقطة نهاية العمل الطبيعية — تُحفظ عندها لقطة داخلية سريعة
        (للتراجع عن خطأ) وتُنزَّل نسخة كملف. الملف وحده يخرج من تخزين المتصفح،
        فهو الحماية الفعلية من عطب الجهاز أو مسح بيانات المتصفح. */
     DB.saveAutoBackup();
     const file = DB.downloadBackupFile();
-    const base = diff === 0 ? "تم الإغلاق — مطابقة تامة ✓" : diff < 0 ? `تم تسجيل عجز ${fmt(Math.abs(diff))} ${cur} على ${assignTo}` : `تم حفظ زيادة ${fmt(diff)} ${cur} في النظام`;
+    const base = diff === 0 ? "تم الإغلاق — مطابقة تامة ✓" : diff < 0 ? `تم تسجيل عجز ${fmt(Math.abs(diff))} ${cur} على ${emp?.name || "—"} وخصمه من راتبه` : `تم حفظ زيادة ${fmt(diff)} ${cur} في النظام`;
     showToast(file ? `${base} — ونُزّلت نسخة احتياطية: ${file}` : base);
     setActual({ cash: "", card: "", transfer: "" }); setAssignTo(""); setNote("");
   };
 
-  const deleteClosing = (id) => {
+  // حذف إغلاق كان فورياً بلا أي تأكيد مسبق (تراجع بعدي فقط عبر toast) — إغلاق
+  // مالي رسمي يستحق تأكيداً صريحاً قبل حذفه لا بعده فقط. يُزال الخصم المرتبط
+  // به أيضاً كي لا يبقى خصماً على راتب موظف لإغلاق لم يعد موجوداً
+  const deleteClosing = async (id) => {
     const removed = closings.find(c => c.id === id);
     if (!removed) return;
+    if (!(await confirm(`حذف إغلاق يوم ${arDate(removed.date)} نهائياً؟${removed.deductionId ? "\n\nسيُزال أيضاً خصم العجز المرتبط به من راتب الموظف." : ""}`, { danger: true }))) return;
     setClosings(cs => cs.filter(c => c.id !== id));
-    showToast("حُذف الإغلاق — يمكن إعادة العد الآن", { onUndo: () => setClosings(cs => [removed, ...cs]) });
+    if (removed.deductionId) setDeductions(ds => ds.filter(d => d.id !== removed.deductionId));
+    showToast("حُذف الإغلاق — يمكن إعادة العد الآن", { onUndo: () => { setClosings(cs => [removed, ...cs]); } });
   };
 
-  // ملخص العجوزات حسب المستخدم
+  // تسوية عجز مستخدم بعد معالجته فعلياً — كان تراكمياً دائماً بلا أي وسيلة
+  // لتصفيره حتى بعد تحصيله أو خصمه من الراتب فعلاً
+  const settleUser = (name) => {
+    setClosings(cs => cs.map(c => (c.status === "shortage" && c.assignedTo === name && !c.settled) ? { ...c, settled: true } : c));
+    showToast(`تمت تسوية عجز ${name}`);
+  };
+
+  // ملخص العجوزات حسب المستخدم — يستثني ما سُوِّي بالفعل
   const shortByUser = {};
-  closings.filter(c => c.status === "shortage" && c.assignedTo).forEach(c => { shortByUser[c.assignedTo] = (shortByUser[c.assignedTo] || 0) + Math.abs(c.diff); });
+  closings.filter(c => c.status === "shortage" && c.assignedTo && !c.settled).forEach(c => { shortByUser[c.assignedTo] = (shortByUser[c.assignedTo] || 0) + Math.abs(c.diff); });
   const surplusTotal = closings.filter(c => c.status === "surplus").reduce((s, c) => s + c.diff, 0);
 
   const ST = { match: { l: "مطابقة ✓", t: "g" }, shortage: { l: "عجز", t: "r" }, surplus: { l: "زيادة", t: "b" } };
+  const closingsShown = closings.filter(c => (!clFrom || c.date >= clFrom) && (!clTo || c.date <= clTo));
+  const clTotalPages = Math.max(1, Math.ceil(closingsShown.length / CL_PAGE_SIZE));
+  const clPageSafe = Math.min(clPage, clTotalPages);
+  const closingsPageRows = closingsShown.slice((clPageSafe - 1) * CL_PAGE_SIZE, clPageSafe * CL_PAGE_SIZE);
+  const closingsExportSheet = () => [{
+    name: "الإغلاقات اليومية",
+    thead: ["التاريخ", "المتوقع", "الفعلي", "الفرق", "الحالة", "على الموظف", "أغلقه", "ملاحظة"],
+    tbody: closingsShown.map(c => [c.date, c.expected.total, c.actual.total, c.diff, ST[c.status].l + (c.settled ? " (سُوِّي)" : ""), c.assignedTo || "—", c.closedBy, c.note || "—"]),
+  }];
+  // تقرير PDF لإغلاق يوم واحد — لمشاركته مع محاسب أو أرشفته ورقياً
+  const printClosing = (c) => {
+    openPdfDoc(ctx.settings, {
+      title: "تقرير إغلاق الخزينة اليومي", recipientLabel: "التاريخ", recipientName: arDate(c.date),
+      docNo: c.id,
+      columns: ["البند", "متوقع", "فعلي"],
+      rows: [
+        ["💵 كاش", fmt(c.expected.cash) + " " + cur, fmt(c.actual.cash) + " " + cur],
+        ["💳 بطاقة", fmt(c.expected.card) + " " + cur, fmt(c.actual.card) + " " + cur],
+        ["🏦 تحويل", fmt(c.expected.transfer) + " " + cur, fmt(c.actual.transfer) + " " + cur],
+      ],
+      totals: [
+        ["الإجمالي المتوقع", fmt(c.expected.total) + " " + cur], ["الإجمالي الفعلي", fmt(c.actual.total) + " " + cur],
+        ["الفرق", (c.diff > 0 ? "+" : "") + fmt(c.diff) + " " + cur], ["الحالة", ST[c.status].l + (c.settled ? " (سُوِّي)" : "")],
+        ...(c.assignedTo ? [["مسجَّل على", c.assignedTo]] : []),
+      ],
+      note: `أُغلق بواسطة: ${c.closedBy}${c.note ? ` — ملاحظة: ${c.note}` : ""}`,
+    });
+  };
+
   const mLabel = { cash: "💵 كاش", card: "💳 بطاقة", transfer: "🏦 تحويل" };
   const rowStyle = { display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0" };
 
@@ -176,10 +236,10 @@ export default function Treasury({ ctx }) {
               </div>
 
               {diff < 0 && (
-                <Field label="تسجيل العجز على المستخدم *">
+                <Field label="تسجيل العجز على الموظف * (يُخصم تلقائياً من راتبه)">
                   <Sel value={assignTo} onChange={e => setAssignTo(e.target.value)}>
-                    <option value="">اختر المستخدم المسؤول...</option>
-                    {users.filter(u => u.active).map(u => <option key={u.id} value={u.name}>{u.name} — {u.role}</option>)}
+                    <option value="">اختر الموظف المسؤول...</option>
+                    {activeEmployees.map(e => <option key={e.id} value={e.id}>{e.name} — {e.role}</option>)}
                   </Sel>
                 </Field>
               )}
@@ -192,10 +252,16 @@ export default function Treasury({ ctx }) {
         {/* ملخصات جانبية */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <Card className="nk-card-hover">
-            <CardHead title="⚠️ عجوزات المستخدمين" sub="التراكمي المسجّل" />
+            <CardHead title="⚠️ عجوزات المستخدمين" sub="غير المُسوَّاة — تُخصم تلقائياً من الراتب" />
             {Object.keys(shortByUser).length === 0 ? <div style={{ textAlign: "center", color: C.mt, fontSize: 12, padding: "1rem" }}>لا عجوزات مسجّلة ✓</div> :
               Object.entries(shortByUser).sort((a, b) => b[1] - a[1]).map(([n, v]) => (
-                <div key={n} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: ".45rem .2rem", borderBottom: `0.5px solid ${C.bc}` }}><span>👤 {n}</span><span style={{ fontWeight: 700, color: "#c0392b" }}>{fmt(v)} {cur}</span></div>
+                <div key={n} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, padding: ".45rem .2rem", borderBottom: `0.5px solid ${C.bc}` }}>
+                  <span>👤 {n}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 700, color: "#c0392b" }}>{fmt(v)} {cur}</span>
+                    <Btn sm onClick={() => settleUser(n)}>✓ تسوية</Btn>
+                  </span>
+                </div>
               ))}
           </Card>
           <Card className="nk-card-hover">
@@ -205,15 +271,38 @@ export default function Treasury({ ctx }) {
         </div>
       </div>
 
-      {/* سجل الإغلاقات */}
+      {/* سجل الإغلاقات — نطاق تاريخ وتصدير وصفحات، كان يعرض كل السجل دفعة واحدة بلا حدّ */}
       <Card>
-        <CardHead title="سجل الإغلاقات اليومية" sub={`${closings.length} إغلاق`} />
-        {closings.length === 0 ? <div style={{ textAlign: "center", color: C.mt, fontSize: 12.5, padding: "1.5rem" }}>لا إغلاقات بعد — أول إغلاق يظهر هنا.</div> : (
-          <Table cols={[{ h: "التاريخ", w: "13%" }, { h: "المتوقع", w: "14%" }, { h: "الفعلي", w: "14%" }, { h: "الفرق", w: "13%" }, { h: "الحالة", w: "12%" }, { h: "على المستخدم", w: "14%" }, { h: "أغلقه", w: "12%" }, { h: "", w: "8%" }]}
-            rows={closings.map(c => [arDate(c.date), fmt(c.expected.total) + " " + cur, fmt(c.actual.total) + " " + cur,
-              <span style={{ fontWeight: 700, color: c.diff === 0 ? "#1a8c3e" : c.diff < 0 ? "#c0392b" : "#2a78d6" }}>{c.diff > 0 ? "+" : ""}{fmt(c.diff)}</span>,
-              <Badge tone={ST[c.status].t}>{ST[c.status].l}</Badge>, c.assignedTo || "—", c.closedBy,
-              <button onClick={() => deleteClosing(c.id)} aria-label="حذف سجل الإغلاق" style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 13 }}>🗑</button>])} />
+        <CardHead title="سجل الإغلاقات اليومية" sub={`${fmt(closingsShown.length)} من ${fmt(closings.length)} إجمالاً`} right={
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <Sel value="" onChange={e => e.target.value && clApplyQuickRange(e.target.value)} style={{ width: 120 }}>
+              <option value="">— نطاق سريع —</option>
+              {QUICK_RANGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </Sel>
+            <Inp type="date" value={clFrom} onChange={e => { setClFrom(e.target.value); setClPage(1); }} aria-label="من تاريخ" style={{ width: 135 }} />
+            <Inp type="date" value={clTo} onChange={e => { setClTo(e.target.value); setClPage(1); }} aria-label="إلى تاريخ" style={{ width: 135 }} />
+            <Btn sm onClick={() => downloadCsv(closingsExportSheet(), `الإغلاقات-${clFrom || "الكل"}-${clTo || today}`)}>⬇ CSV</Btn>
+            <Btn sm onClick={() => downloadExcel(closingsExportSheet(), `الإغلاقات-${clFrom || "الكل"}-${clTo || today}`)}>📊 Excel</Btn>
+          </div>
+        } />
+        {closingsShown.length === 0 ? <div style={{ textAlign: "center", color: C.mt, fontSize: 12.5, padding: "1.5rem" }}>لا إغلاقات ضمن هذا النطاق.</div> : (
+          <>
+            <Table cols={[{ h: "التاريخ", w: "12%" }, { h: "المتوقع", w: "13%" }, { h: "الفعلي", w: "13%" }, { h: "الفرق", w: "12%" }, { h: "الحالة", w: "13%" }, { h: "على الموظف", w: "13%" }, { h: "أغلقه", w: "11%" }, { h: "", w: "13%" }]}
+              rows={closingsPageRows.map(c => [arDate(c.date), fmt(c.expected.total) + " " + cur, fmt(c.actual.total) + " " + cur,
+                <span style={{ fontWeight: 700, color: c.diff === 0 ? "#1a8c3e" : c.diff < 0 ? "#c0392b" : "#2a78d6" }}>{c.diff > 0 ? "+" : ""}{fmt(c.diff)}</span>,
+                <Badge tone={c.settled ? "g" : ST[c.status].t}>{ST[c.status].l}{c.settled ? " (سُوِّي)" : ""}</Badge>, c.assignedTo || "—", c.closedBy,
+                <span style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => printClosing(c)} aria-label="طباعة تقرير الإغلاق" title="طباعة PDF" style={{ background: "none", border: "none", cursor: "pointer", color: C.blue, fontSize: 13 }}>🖨</button>
+                  <button onClick={() => deleteClosing(c.id)} aria-label="حذف سجل الإغلاق" style={{ background: "none", border: "none", cursor: "pointer", color: C.mt, fontSize: 13 }}>🗑</button>
+                </span>])} />
+            {clTotalPages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${C.bc}` }}>
+                <Btn sm onClick={() => setClPage(p => Math.max(1, p - 1))} style={{ opacity: clPageSafe === 1 ? .4 : 1 }}>‹ السابق</Btn>
+                <span style={{ fontSize: 12, color: C.mt }}>صفحة {clPageSafe} من {clTotalPages}</span>
+                <Btn sm onClick={() => setClPage(p => Math.min(clTotalPages, p + 1))} style={{ opacity: clPageSafe === clTotalPages ? .4 : 1 }}>التالي ›</Btn>
+              </div>
+            )}
+          </>
         )}
       </Card>
     </>
