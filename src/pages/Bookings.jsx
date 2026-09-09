@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { TYPE_ICON, TYPE_NAME, TYPE_DEFAULT_RATE } from "../constants/seeds.js";
 import { PageTop, Btn, KCard, Card, CardHead, Table, Badge, Modal, Field, Inp, Sel } from "../components/ui.jsx";
@@ -7,6 +7,7 @@ import { rangePreset, QUICK_RANGES } from "../utils/analytics.js";
 import { downloadCsv, downloadExcel } from "../utils/exportTable.js";
 import { customerSaleDelta, applyCustomerSale } from "../utils/customerLink.js";
 import { findConflict, nextReservationToday, isOverdue } from "../utils/reservations.js";
+import { playTimeUpAlarm } from "../utils/sound.js";
 
 /* ============================ BOOKINGS ============================ */
 export default function Bookings({ ctx }) {
@@ -27,7 +28,32 @@ export default function Bookings({ ctx }) {
   const [cancelForm, setCancelForm] = useState({ customer: "", resType: "billiard", reason: "عدم حضور", note: "", date: todayISO() });
   const CANCEL_REASONS = ["عدم حضور", "إلغاء بطلب الزبون", "خطأ في التسجيل", "أخرى"];
   const [, force] = useState(0);
-  useEffect(() => { const t = setInterval(() => force(x => x + 1), 1000); return () => clearInterval(t); }, []);
+  // مراجع دائمة التحديث لأحدث bookings/settings — المؤقّت أدناه يُثبَّت مرة واحدة
+  // فقط (بلا اعتماديات) فيرى قيماً قديمة بدونها (نفس نمط addByCodeRef في POS.jsx)
+  const bookingsRef = useRef(bookings);
+  bookingsRef.current = bookings;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const alarmedRef = useRef({}); // bookingId -> وقت آخر تنبيه صوتي
+  const ALARM_REPEAT_MS = 30000; // يتكرّر كل نصف دقيقة حتى تُنهى الطاولة
+  useEffect(() => {
+    const t = setInterval(() => {
+      force(x => x + 1);
+      const live = bookingsRef.current;
+      const now = Date.now();
+      // ينظّف أي مفتاح لحجز لم يعد نشطاً — بلا هذا يتراكم بلا حدّ عبر جلسة طويلة
+      Object.keys(alarmedRef.current).forEach(id => { if (!live[id]) delete alarmedRef.current[id]; });
+      if (settingsRef.current?.soundAlerts === false) return;
+      Object.entries(live).forEach(([id, b]) => {
+        if (!b.prepaid || b.durationMin == null) return; // الحجز المفتوح بلا وقت يُنتهى
+        const over = (b.startTime + b.durationMin * 60000) - now <= 0;
+        if (!over) { delete alarmedRef.current[id]; return; }
+        const last = alarmedRef.current[id] || 0;
+        if (now - last >= ALARM_REPEAT_MS) { playTimeUpAlarm(); alarmedRef.current[id] = now; }
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
   // فلتر النطاق الزمني وسجل الحجوزات المكتملة (يتبعه التصدير أيضاً) — كان السجل
   // كله يُعرض بلا تاريخ ولا فلترة، فالبطاقات أعلاه كانت تجمع تاريخ النظام كله
   // رغم تسميتها «اليوم»

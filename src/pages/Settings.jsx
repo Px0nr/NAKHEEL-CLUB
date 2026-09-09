@@ -4,6 +4,7 @@ import { PageTop, Btn, Card, CardHead, Crest, Field, Inp, inputStyle, Badge } fr
 import InvoiceDesigner from "./InvoiceDesigner.jsx";
 import BackupManager from "./BackupManager.jsx";
 import { todayISO } from "../utils/format.js";
+import { playTimeUpAlarm } from "../utils/sound.js";
 import { DB } from "../db/db.js";
 
 export default function Settings({ ctx }) {
@@ -81,6 +82,18 @@ export default function Settings({ ctx }) {
               <div style={{ fontSize: 12.5, fontWeight: 600 }}>المؤثرات الحركية</div>
               <div onClick={() => set("animations", !settings.animations)} style={{ width: 34, height: 18, borderRadius: 9, background: settings.animations ? C.grl : "#ccc", position: "relative", cursor: "pointer" }}>
                 <div style={{ position: "absolute", width: 14, height: 14, borderRadius: "50%", background: "#fff", top: 2, right: settings.animations ? 2 : 18, transition: "right .2s" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, padding: "0 .3rem" }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 600 }}>🔔 تنبيه صوتي عند انتهاء وقت الحجز</div>
+                <div style={{ fontSize: 10.5, color: C.mt, marginTop: 1 }}>يتكرّر كل نصف دقيقة حتى تُنهى الطاولة — لتنبيه الموظف حتى لو ابتعد عن الشاشة</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {settings.soundAlerts !== false && <Btn sm onClick={playTimeUpAlarm}>🔊 تجربة</Btn>}
+                <div onClick={() => set("soundAlerts", settings.soundAlerts === false)} style={{ width: 34, height: 18, borderRadius: 9, background: settings.soundAlerts !== false ? C.grl : "#ccc", position: "relative", cursor: "pointer" }}>
+                  <div style={{ position: "absolute", width: 14, height: 14, borderRadius: "50%", background: "#fff", top: 2, right: settings.soundAlerts !== false ? 2 : 18, transition: "right .2s" }} />
+                </div>
               </div>
             </div>
           </Card>

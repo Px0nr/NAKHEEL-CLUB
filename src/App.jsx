@@ -193,6 +193,7 @@ function NakheelApp() {
     invoiceShowLogo: true,
     currency: "د.ل",
     animations: true,
+    soundAlerts: true, // تنبيه صوتي عند انتهاء وقت حجز مدفوع مقدماً — يتكرّر حتى تُنهى الطاولة
   }, true);
 
   // data stores — كلها محفوظة دائمياً
