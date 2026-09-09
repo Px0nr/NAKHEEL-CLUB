@@ -90,6 +90,20 @@ export function toSegments(totals, cats = {}, dark = false, maxSegments = 5) {
 const isoUTC = (dt) => dt.toISOString().slice(0, 10);
 
 // نطاق جاهز { from, to } بصيغة ISO
+// نطاقات زمنية سريعة جاهزة للعرض في أي شاشة (التقارير، سجل الفواتير) — تُترجم
+// عبر rangePreset أدناه إلى from/to فعليين
+export const QUICK_RANGES = [
+  ["today", "اليوم"],
+  ["last7", "آخر 7 أيام"],
+  ["last30", "آخر 30 يوماً"],
+  ["thisMonth", "هذا الشهر"],
+  ["lastMonth", "الشهر الماضي"],
+  ["thisQuarter", "هذا الربع"],
+  ["lastQuarter", "الربع الماضي"],
+  ["thisYear", "هذه السنة"],
+  ["lastYear", "السنة الماضية"],
+];
+
 export function rangePreset(preset, ref = new Date()) {
   const y = ref.getUTCFullYear(), m = ref.getUTCMonth(), d = ref.getUTCDate();
   const today = isoUTC(ref);

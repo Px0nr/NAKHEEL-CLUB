@@ -4,6 +4,8 @@ import { PageTop, Card, CardHead, KCard, Table, Badge, Btn, Modal, Sel, inputSty
 import { openPdfDoc } from "../components/pdfHook.js";
 import { arDate, todayISO } from "../utils/format.js";
 import { applyReversal } from "../utils/invoiceReversal.js";
+import { rangePreset, QUICK_RANGES } from "../utils/analytics.js";
+import { downloadCsv, downloadExcel } from "../utils/exportTable.js";
 import { DB } from "../db/db.js";
 
 /* ============================ SALES ============================ */
@@ -12,6 +14,10 @@ export default function Sales({ ctx, can }) {
   const cur = ctx.settings?.currency || "د.ل";
   const [q, setQ] = useState(() => (ctx.searchIntent && ctx.searchIntent.type === "invoice") ? ctx.searchIntent.query : "");
   const [filter, setFilter] = useState("all");
+  // النطاق الزمني فارغ افتراضياً = كل الفواتير (السلوك السابق)، فلا يُفاجأ المستخدم
+  // بسجل مقصوص عند فتح الصفحة
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState(() => {
     if (ctx.searchIntent && ctx.searchIntent.type === "invoice") {
@@ -23,14 +29,37 @@ export default function Sales({ ctx, can }) {
   const PAGE_SIZE = 50;
   const PAY_TONE = { "كاش": "g", "بطاقة": "b", "تحويل": "p", "آجل": "a" };
   const SRC_TONE = { "منتج": "b", "حجز": "gold", "تأجير": "p", "رصيد سابق": "a" };
+  // البحث يشمل أسماء الأصناف داخل الفاتورة أيضاً — «من اشترى هذا الصنف؟» سؤال
+  // يومي لم يكن ممكناً حين اقتصر البحث على اسم الزبون ورقم الفاتورة
+  const matchesQuery = (i) => {
+    if (!q) return true;
+    const t = q.trim();
+    return (i.customer || "").includes(t) || (i.id || "").includes(t) ||
+      (i.details || "").includes(t) ||
+      (i.items || []).some(it => (it.name || "").includes(t));
+  };
   const shown = invoices.filter(i =>
     (filter === "all" || i.status === filter) &&
-    (i.customer.includes(q) || i.id.includes(q))
+    (!from || i.date >= from) && (!to || i.date <= to) &&
+    matchesQuery(i)
   );
   const totalPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pageRows = shown.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
-  const monthSales = invoices.filter(i => i.status === "مدفوعة").reduce((s, i) => s + i.total, 0);
+  // المؤشرات تتبع ما هو معروض فعلاً: كانت تجمع كل تاريخ النظام فتفقد معناها
+  // بعد أشهر من التشغيل، ولا تتأثر بأي فلتر يختاره المستخدم
+  const shownPaid = shown.filter(i => i.status === "مدفوعة");
+  const shownSales = shownPaid.reduce((s, i) => s + i.total, 0);
+  const applyQuickRange = (key) => { const r = rangePreset(key); setFrom(r.from); setTo(r.to); setPage(1); };
+  const clearFilters = () => { setFrom(""); setTo(""); setQ(""); setFilter("all"); setPage(1); };
+
+  // التصدير يتبع الفلاتر الحالية — تصدير كل شيء دائماً يجعل الفلترة بلا فائدة
+  const exportSheet = () => [{
+    name: "الفواتير",
+    thead: ["رقم", "الزبون", "التاريخ", "الوقت", "المصدر", "التفاصيل", "الدفع", "الحالة", "بواسطة", `الإجمالي (${cur})`],
+    tbody: shown.map(i => ["#" + i.id, i.customer, i.date, i.time || "", i.source, i.details, i.paidVia ? `آجل ← ${i.paidVia}` : i.pay, i.status, i.by || "", i.total]),
+  }];
+  const exportName = () => `الفواتير-${from || "الكل"}-${to || todayISO()}`;
   // رسالة تُلحق بالتأكيد حين تكون الفاتورة قديمة (بلا حقل pieces) فقد يكون عدد
   // القطع المُعادة تقريبياً — الشفافية هنا أفضل من عكسٍ صامت بأرقام قد تكون خاطئة
   const reversalNote = (inv) => {
@@ -81,19 +110,33 @@ export default function Sales({ ctx, can }) {
     <>
       <PageTop title="المبيعات والفواتير" />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 11, marginBottom: "1.1rem" }}>
-        <KCard label="إجمالي المبيعات" value={fmt(monthSales)} sub="دينار ليبي" bar="#1a8c3e" />
-        <KCard label="عدد الفواتير" value={invoices.length} bar="#2a78d6" />
-        <KCard label="متوسط الفاتورة" value={(() => { const paid = invoices.filter(i => i.status === "مدفوعة"); return paid.length ? fmt(Math.round(monthSales / paid.length)) : 0; })()} sub="د.ل" bar={C.gold} />
+        <KCard label="مبيعات الفترة المعروضة" value={fmt(shownSales)} sub={cur} bar="#1a8c3e" />
+        <KCard label="عدد الفواتير" value={fmt(shown.length)} sub={`من ${fmt(invoices.length)} إجمالاً`} bar="#2a78d6" />
+        <KCard label="متوسط الفاتورة" value={shownPaid.length ? fmt(Math.round(shownSales / shownPaid.length)) : 0} sub={cur} bar={C.gold} />
       </div>
       <Card>
         <CardHead title="سجل الفواتير" sub={`الفواتير من الحجوزات تظهر بعلامة (حجز) — ${fmt(shown.length)} فاتورة مطابقة — اضغط أي صف لعرض التفاصيل`} right={
-          <div style={{ display: "flex", gap: 7 }}>
-            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="بحث..." style={{ ...inputStyle, width: 150 }} />
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="بحث باسم زبون أو صنف أو رقم..." style={{ ...inputStyle, width: 210 }} />
             <Sel value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }} style={{ width: 110 }}>
               <option value="all">كل الحالات</option><option value="مدفوعة">مدفوعة</option><option value="معلقة">معلقة</option><option value="ملغاة">ملغاة</option>
             </Sel>
           </div>
         } />
+        {/* شريط النطاق الزمني والتصدير — كان السجل بلا أي تحديد زمني: كل فواتير
+            النظام مقسّمة على صفحات، فلا سبيل لسؤال «فواتير أمس» أو تسليم المحاسب ملفاً */}
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginBottom: ".8rem", paddingBottom: ".8rem", borderBottom: `0.5px solid ${C.bc}` }}>
+          <Sel value="" onChange={e => e.target.value && applyQuickRange(e.target.value)} style={{ width: 130 }}>
+            <option value="">— نطاق سريع —</option>
+            {QUICK_RANGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </Sel>
+          <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} aria-label="من تاريخ" style={{ ...inputStyle, width: 145 }} />
+          <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} aria-label="إلى تاريخ" style={{ ...inputStyle, width: 145 }} />
+          {(from || to || q || filter !== "all") && <Btn sm onClick={clearFilters}>✕ مسح الفلاتر</Btn>}
+          <div style={{ flex: 1 }} />
+          <Btn sm onClick={() => downloadCsv(exportSheet(), exportName())}>⬇ تصدير CSV</Btn>
+          <Btn sm onClick={() => downloadExcel(exportSheet(), exportName())}>📊 تصدير Excel</Btn>
+        </div>
         <Table cols={[{ h: "رقم", w: "13%" }, { h: "الزبون", w: "16%" }, { h: "التاريخ", w: "12%" }, { h: "المصدر", w: "11%" }, { h: "التفاصيل", w: "16%" }, { h: "الدفع", w: "10%" }, { h: "الإجمالي", w: "11%" }, { h: "الحالة", w: "11%" }]}
           rows={pageRows.map(i => [
             <span onClick={() => setDetail(i)} style={{ cursor: "pointer", fontWeight: 600, color: C.blue }}>#{i.id}</span>,
@@ -102,7 +145,7 @@ export default function Sales({ ctx, can }) {
             <Badge tone={SRC_TONE[i.source] || "b"}>{i.source}</Badge>,
             <span onClick={() => setDetail(i)} style={{ cursor: "pointer" }}>{i.details}</span>,
             <Badge tone={PAY_TONE[i.pay] || "g"}>{i.pay}</Badge>,
-            fmt(i.total) + " د.ل",
+            fmt(i.total) + " " + cur,
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <Badge tone={i.status === "مدفوعة" ? "g" : i.status === "ملغاة" ? "r" : "a"}>{i.status}</Badge>
               <button onClick={() => setDetail(i)} title="عرض التفاصيل" style={{ background: "none", border: "none", cursor: "pointer", color: C.blue, fontSize: 13 }}>👁</button>

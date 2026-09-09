@@ -3,9 +3,10 @@ import { C, fmt } from "../constants/theme.js";
 import { TYPE_NAME, TYPE_ICON, ASSET_STATUS } from "../constants/seeds.js";
 import { PageTop, Field, Sel, Inp, Btn, Table, Crest } from "../components/ui.jsx";
 import { RankBarChart, TrendChart } from "../components/charts.jsx";
-import { pctDelta, rangePreset } from "../utils/analytics.js";
+import { pctDelta, rangePreset, QUICK_RANGES } from "../utils/analytics.js";
 import { todayISO, arDate, daysBetween } from "../utils/format.js";
 import { parseBookingMinutes } from "../utils/bookings.js";
+import { downloadCsv, downloadExcel } from "../utils/exportTable.js";
 
 // يبني مصفوفة يوماً بيوم عبر [rFrom, rTo] (أيام بلا حركة تُملأ صفراً) — أساس أي
 // رسم اتجاه زمني (TrendChart)، ويُستخدَم لأكثر من نوع تقرير فتفادينا تكراره
@@ -21,20 +22,6 @@ const dailySeries = (rFrom, rTo, valueForDate) => {
 // نفس عتبة الثلاثين يوماً المعتمدة في المخزون الراكد (Insights.jsx) لتناسق المفهوم عبر النظام
 const CUSTOMER_INACTIVITY_DAYS = 30;
 
-// نطاقات سريعة تُطبَّق على from/to بضغطة واحدة بدل اختيار تاريخين يدوياً في كل مرة —
-// rangePreset() نفسها المستخدمة أصلاً في Insights.jsx، هنا فقط قائمة أوسع تناسب
-// تقارير الإغلاق المحاسبي (الشهر الماضي، الربع الماضي، السنة الماضية) التي لا يحتاجها Insights
-const QUICK_RANGES = [
-  ["today", "اليوم"],
-  ["last7", "آخر 7 أيام"],
-  ["last30", "آخر 30 يوماً"],
-  ["thisMonth", "هذا الشهر"],
-  ["lastMonth", "الشهر الماضي"],
-  ["thisQuarter", "هذا الربع"],
-  ["lastQuarter", "الربع الماضي"],
-  ["thisYear", "هذه السنة"],
-  ["lastYear", "السنة الماضية"],
-];
 
 /* ============================ REPORTS ============================ */
 export default function Reports({ ctx }) {
@@ -406,48 +393,13 @@ export default function Reports({ ctx }) {
   const headlineDelta = (!rangeless && cfg.headline != null && prevCfg?.headline != null) ? pctDelta(cfg.headline, prevCfg.headline) : null;
 
   // تصدير التقرير الحالي كملف Excel (xlsx) منسّق — عناوين غامقة، اتجاه RTL، عرض أعمدة تلقائي
-  const downloadExcel = async () => {
-    const ExcelJS = (await import("exceljs")).default;
-    const wb = new ExcelJS.Workbook();
-    const addSheet = (name, thead, tbody) => {
-      const ws = wb.addWorksheet(name, { views: [{ rightToLeft: true }] });
-      ws.addRow(thead);
-      ws.getRow(1).font = { bold: true, color: { argb: "FFF0D080" } };
-      ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A5C2E" } };
-      tbody.forEach(r => ws.addRow(r));
-      ws.columns.forEach((col, i) => {
-        const maxLen = Math.max(thead[i]?.length || 10, ...tbody.map(r => String(r[i] ?? "").length));
-        col.width = Math.min(40, Math.max(10, maxLen + 2));
-      });
-    };
-    addSheet(cfg.title.slice(0, 31), cfg.thead, cfg.tbody);
-    if (cfg.tbody2 && cfg.tbody2.length) addSheet((cfg.title2 || "تفصيل إضافي").slice(0, 31), cfg.thead2, cfg.tbody2);
-    const buf = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${cfg.title.replace(/\s+/g, "-")}-${todayISO()}.xlsx`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // أوراق التصدير: الجدول الرئيسي، ويُضاف الجدول التفصيلي إن وُجد (تأجير/قسم/زبائن...)
+  const exportSheets = () => {
+    const sheets = [{ name: cfg.title, thead: cfg.thead, tbody: cfg.tbody }];
+    if (cfg.tbody2 && cfg.tbody2.length) sheets.push({ name: cfg.title2 || "تفصيل إضافي", thead: cfg.thead2, tbody: cfg.tbody2 });
+    return sheets;
   };
-
-  // تصدير التقرير الحالي كملف CSV (يفتح مباشرة في Excel)
-  const downloadCSV = () => {
-    const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
-    let csv = cfg.thead.map(esc).join(",") + "\n";
-    cfg.tbody.forEach(r => { csv += r.map(esc).join(",") + "\n"; });
-    if (cfg.tbody2 && cfg.tbody2.length) {
-      csv += "\n" + esc(cfg.title2 || "") + "\n";
-      csv += cfg.thead2.map(esc).join(",") + "\n";
-      cfg.tbody2.forEach(r => { csv += r.map(esc).join(",") + "\n"; });
-    }
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${cfg.title.replace(/\s+/g, "-")}-${todayISO()}.csv`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
+  const exportName = () => `${cfg.title}-${todayISO()}`;
 
   // إعدادات تقارير محفوظة — تلتقط نوع التقرير وفلاتره ونطاقه الزمني تحت اسم يختاره المستخدم لاستدعائها لاحقاً بضغطة واحدة
   const savePreset = () => {
@@ -534,8 +486,8 @@ export default function Reports({ ctx }) {
           <Field label="من تاريخ"><Inp type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field>
           <Field label="إلى تاريخ"><Inp type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
         </>}
-        <Btn onClick={downloadCSV} style={{ marginBottom: ".75rem" }}>⬇ تصدير CSV</Btn>
-        <Btn onClick={downloadExcel} style={{ marginBottom: ".75rem" }}>📊 تصدير Excel</Btn>
+        <Btn onClick={() => downloadCsv(exportSheets(), exportName())} style={{ marginBottom: ".75rem" }}>⬇ تصدير CSV</Btn>
+        <Btn onClick={() => downloadExcel(exportSheets(), exportName())} style={{ marginBottom: ".75rem" }}>📊 تصدير Excel</Btn>
         <Btn gold onClick={doPrint} style={{ marginBottom: ".75rem" }}>🖨 طباعة PDF</Btn>
       </div>
       <div style={{ background: C.cd, border: `0.5px solid ${C.bc}`, borderRadius: 12, padding: ".7rem 1rem", marginBottom: "1rem", display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
