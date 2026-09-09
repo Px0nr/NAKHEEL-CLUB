@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { PageTop, Badge, KCard, Card, CardHead, Field, Inp, Sel, Btn, Table } from "../components/ui.jsx";
 import { todayISO, arDate } from "../utils/format.js";
+import { payBreakdown } from "../utils/payments.js";
 import { DB } from "../db/db.js";
 
 /* ============================ TREASURY (الخزينة والإغلاق اليومي) ============================ */
@@ -30,7 +31,7 @@ export default function Treasury({ ctx }) {
     const out = { cash: 0, card: 0, transfer: 0, total: 0 };
     const add = (m, v) => { if (m === "كاش") out.cash += v; else if (m === "بطاقة") out.card += v; else if (m === "تحويل") out.transfer += v; out.total += v; };
     // مبيعات مدفوعة فوراً (غير الآجلة — الآجلة تدخل عبر سجل القبض بيوم استلامها)
-    invoices.filter(i => i.status === "مدفوعة" && i.pay !== "آجل" && inRange(i.date)).forEach(i => add(i.pay, i.total));
+    invoices.filter(i => i.status === "مدفوعة" && i.pay !== "آجل" && inRange(i.date)).forEach(i => payBreakdown(i).forEach(pt => add(pt.method, pt.amount)));
     // قبض ديون الزبائن (يشمل الدفعات الجزئية)
     payments.filter(p => p.kind === "قبض" && inRange(p.date)).forEach(p => add(p.via, p.amount));
     return out;
@@ -42,7 +43,7 @@ export default function Treasury({ ctx }) {
   const expected = useMemo(() => {
     const rev = { cash: 0, card: 0, transfer: 0 };
     const addRev = (m, v) => { if (m === "كاش") rev.cash += v; else if (m === "بطاقة") rev.card += v; else if (m === "تحويل") rev.transfer += v; };
-    invoices.filter(i => i.status === "مدفوعة" && i.pay !== "آجل" && i.date === closeDate).forEach(i => addRev(i.pay, i.total));
+    invoices.filter(i => i.status === "مدفوعة" && i.pay !== "آجل" && i.date === closeDate).forEach(i => payBreakdown(i).forEach(pt => addRev(pt.method, pt.amount)));
     payments.filter(p => p.kind === "قبض" && p.date === closeDate).forEach(p => addRev(p.via, p.amount));
     const expOut = { cash: 0, card: 0, transfer: 0 };
     expenses.filter(e => e.date === closeDate).forEach(e => {

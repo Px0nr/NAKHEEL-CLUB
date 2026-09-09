@@ -10,6 +10,7 @@ import { todayISO, matchesBarcode, matchesBarcodePartial } from "../utils/format
 import { promoFor } from "../utils/promos.js";
 import { applyReversal } from "../utils/invoiceReversal.js";
 import { loadCart, saveCart } from "../utils/posCart.js";
+import { buildSplit, PAY_METHODS } from "../utils/payments.js";
 
 const qbtn = { width: 22, height: 22, borderRadius: 6, border: `0.5px solid ${C.bc}`, background: C.crm, cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
 const posUnitBtn = (primary) => ({ flex: 1, padding: ".28rem .3rem", borderRadius: 6, fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${primary ? C.gold : C.bc}`, background: primary ? C.gold + "18" : C.crm, color: primary ? C.gdd : C.k2, whiteSpace: "nowrap" });
@@ -41,6 +42,14 @@ export default function POS({ ctx, can, go }) {
   const [redeemPoints, setRedeemPoints] = useState(false);
   const [deferEmployee, setDeferEmployee] = useState(null);
   const [cashReceived, setCashReceived] = useState("");
+  // دفع مقسَّم على طريقتين (كاش + بطاقة مثلاً) — متاح للطرق الفورية فقط، لأن
+  // الآجل والموظف يُنشئان ديناً على حساب فلا يصحّ خلطهما بجزء مقبوض
+  const [splitOn, setSplitOn] = useState(false);
+  const [splitAmount, setSplitAmount] = useState("");
+  const [splitMethod2, setSplitMethod2] = useState("بطاقة");
+  // اسم/ملاحظة للفاتورة المعلَّقة — ثلاث فواتير معلَّقة متشابهة القيمة كانت بلا هوية
+  const [parkPrompt, setParkPrompt] = useState(false);
+  const [parkLabel, setParkLabel] = useState("");
   const [lastSale, setLastSale] = useState(null); // آخر عملية بيع مكتملة — لإتاحة الإيصال الفوري والتراجع
 
   // حفظ السلة على الجهاز مع كل تغيير. لا حاجة لمسحٍ صريح عند إتمام البيع أو
@@ -172,7 +181,14 @@ export default function POS({ ctx, can, go }) {
   const total = Math.max(0, sub - disc - pointsDiscount);
   const cashNum = parseFloat(cashReceived) || 0;
   const change = pay === "cash" ? Math.round((cashNum - total) * 100) / 100 : 0;
-  const cashInsufficient = pay === "cash" && cashReceived !== "" && cashNum < total;
+  // التقسيم للطرق الفورية فقط: الآجل والموظف يُنشئان ديناً على حساب، وخلطهما
+  // بجزء مقبوض يجعل الدَين والخزينة كليهما خاطئَين
+  const splitAllowed = pay === "cash" || pay === "card" || pay === "transfer";
+  const splitActive = splitAllowed && splitOn;
+  const splitFirst = Math.round((parseFloat(splitAmount) || 0) * 100) / 100;
+  const splitRest = Math.round((total - splitFirst) * 100) / 100;
+  // حاسبة الباقي للكاش الكامل فقط — في التقسيم يُدخَل مبلغ كل جزء بدقة
+  const cashInsufficient = pay === "cash" && !splitActive && cashReceived !== "" && cashNum < total;
 
   /* ---------- حركة السلة ----------
      دخول الأصناف المضافة حديثاً فقط: تأكيد بصري فوري للمس على اللوحي.
@@ -213,6 +229,12 @@ export default function POS({ ctx, can, go }) {
   const checkout = () => {
     if (!items.length) return;
     if (cashInsufficient) { showToast("المبلغ المستلم أقل من الإجمالي"); return; }
+    // أجزاء الدفع المقسَّم — تُبنى وتُتحقَّق قبل أي تعديل على المخزون أو الحسابات
+    let split = null;
+    if (splitAllowed && splitOn) {
+      split = buildSplit({ total, firstMethod: PAY_LABEL[pay], firstAmount: splitAmount, secondMethod: splitMethod2 });
+      if (split.error) { showToast(split.error); return; }
+    }
     const num = "INV-" + ctx.nextCounter("invoice");
     const details = items.map(i => `${i.name} ×${i.qty} ${i.sellUnit === "pack" ? i.unitLabel : ""}`.trim()).join("، ");
     let custName = "زبون نقدي";
@@ -257,11 +279,11 @@ export default function POS({ ctx, can, go }) {
     // pieces: عدد القطع المخصومة فعلاً من المخزون لهذا السطر (qty قد يكون بالعلبة).
     // بدونه لا يستطيع إلغاء الفاتورة لاحقاً من سجل المبيعات إعادة الكمية الصحيحة —
     // انظر utils/invoiceReversal.js
-    const inv = { id: num, customer: custName, customerId: custId, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, pieces: it.qty * it.perPieces, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), loyaltyEarned, loyaltyRedeemed, pay: PAY_LABEL[pay], discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}) };
+    const inv = { id: num, customer: custName, customerId: custId, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, pieces: it.qty * it.perPieces, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), loyaltyEarned, loyaltyRedeemed, pay: split ? split.label : PAY_LABEL[pay], ...(split ? { payParts: split.parts } : {}), discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}) };
     setInvoices(iv => [inv, ...iv]);
     showToast(pay === "defer" ? `فاتورة آجلة #${num} على ${custName} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}` : pay === "employee" ? `فاتورة موظف #${num} على ${custName} — ${fmt(total)} ${cur}${freeValue > 0 ? ` (مزايا مجانية ${fmt(freeValue)} ${cur})` : ""}` : `تم إنشاء الفاتورة #${num} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}`);
     setLastSale({ invoice: inv, stockDeltas, isDefer: pay === "defer", deferCustId: pay === "defer" ? deferCustomer.id : null, loyaltyCustId: custForPoints ? custForPoints.id : null, loyaltyEarned, loyaltyRedeemed });
-    setCart({}); setDiscPct(0); setCoupon(""); setDeferCustomer(null); setDueDate(""); setPointsCustomer(null); setRedeemPoints(false); setDeferEmployee(null); setCashReceived("");
+    setCart({}); setDiscPct(0); setCoupon(""); setDeferCustomer(null); setDueDate(""); setPointsCustomer(null); setRedeemPoints(false); setDeferEmployee(null); setCashReceived(""); setSplitOn(false); setSplitAmount("");
   };
 
   // مرجع دائم التحديث لأحدث checkout — نفس سبب addByCodeRef أعلاه: المستمع العالمي
@@ -305,8 +327,8 @@ export default function POS({ ctx, can, go }) {
   // تعليق السلة الحالية مؤقتاً (مثلاً حين يبتعد الزبون) — تُحفظ ويُفرَّغ العمل الحالي لخدمة زبون آخر فوراً
   const parkSale = () => {
     if (!items.length) return;
-    setParkedSales(ps => [{ id: "PK-" + Date.now(), ts: new Date().toISOString(), cart, discPct, coupon, pay, count: items.reduce((s, i) => s + i.qty, 0), total }, ...ps]);
-    setCart({}); setDiscPct(0); setCoupon(""); setCashReceived("");
+    setParkedSales(ps => [{ id: "PK-" + Date.now(), ts: new Date().toISOString(), label: parkLabel.trim(), cart, discPct, coupon, pay, count: items.reduce((s, i) => s + i.qty, 0), total }, ...ps]);
+    setCart({}); setDiscPct(0); setCoupon(""); setCashReceived(""); setSplitOn(false); setSplitAmount(""); setParkPrompt(false); setParkLabel("");
     showToast("عُلِّقت الفاتورة — يمكنك استئنافها لاحقاً من الأعلى");
   };
   // استئناف فاتورة معلَّقة: يستبدل سلة العمل الحالية (إن كانت فيها أصناف تُفقد — نحذّر أولاً)
@@ -369,7 +391,7 @@ export default function POS({ ctx, can, go }) {
               <span style={{ fontSize: 11.5, fontWeight: 700, color: C.gdd, alignSelf: "center" }}>⏸ فواتير معلَّقة ({parkedSales.length}):</span>
               {parkedSales.map(pk => (
                 <div key={pk.id} style={{ display: "flex", alignItems: "center", gap: 5, background: C.cd, border: `0.5px solid ${C.bc}`, borderRadius: 8, padding: ".3rem .5rem", fontSize: 11.5 }}>
-                  <button onClick={() => resumeSale(pk)} style={{ background: "none", border: "none", cursor: "pointer", color: C.grn2, fontWeight: 600, fontFamily: "inherit" }}>▶ {pk.count} صنف — {fmt(pk.total)} {cur}</button>
+                  <button onClick={() => resumeSale(pk)} style={{ background: "none", border: "none", cursor: "pointer", color: C.grn2, fontWeight: 600, fontFamily: "inherit" }}>▶ {pk.label ? pk.label + " — " : ""}{pk.count} صنف — {fmt(pk.total)} {cur}{pk.ts ? <span style={{ color: C.mt, fontWeight: 400 }}>{" · " + new Date(pk.ts).toTimeString().slice(0, 5)}</span> : null}</button>
                   <button onClick={() => discardParked(pk)} title="حذف" style={{ background: "none", border: "none", cursor: "pointer", color: C.red, fontSize: 13 }}>✕</button>
                 </div>
               ))}
@@ -444,8 +466,21 @@ export default function POS({ ctx, can, go }) {
         <Card style={{ position: "sticky", top: "1rem" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: ".9rem" }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>🛍 سلة المبيعات</div>
-            {items.length > 0 && <button onClick={parkSale} title="تعليق الفاتورة لاستئنافها لاحقاً" style={{ background: "none", border: `1px solid ${C.bc}`, borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 600, padding: ".25rem .6rem", color: C.k2, fontFamily: "inherit" }}>⏸ تعليق</button>}
+            {items.length > 0 && <button onClick={() => { setParkLabel(deferCustomer?.name || pointsCustomer?.name || ""); setParkPrompt(true); }} title="تعليق الفاتورة لاستئنافها لاحقاً" style={{ background: "none", border: `1px solid ${C.bc}`, borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 600, padding: ".25rem .6rem", color: C.k2, fontFamily: "inherit" }}>⏸ تعليق</button>}
           </div>
+          {/* تسمية الفاتورة المعلَّقة — اختيارية: Enter بلا كتابة يُعلّق كما كان سابقاً */}
+          {parkPrompt && (
+            <div style={{ background: C.gold + "12", border: `0.5px solid ${C.gold}55`, borderRadius: 10, padding: ".6rem .7rem", marginBottom: ".8rem" }}>
+              <div style={{ fontSize: 11, color: C.gdd, fontWeight: 700, marginBottom: 5 }}>اسم الزبون أو ملاحظة (اختياري)</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input autoFocus value={parkLabel} onChange={e => setParkLabel(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") parkSale(); if (e.key === "Escape") { setParkPrompt(false); setParkLabel(""); } }}
+                  placeholder="مثال: الطاولة 3" style={{ ...inputStyle, flex: 1 }} />
+                <Btn sm gold onClick={parkSale}>⏸ تعليق</Btn>
+                <Btn sm onClick={() => { setParkPrompt(false); setParkLabel(""); }}>إلغاء</Btn>
+              </div>
+            </div>
+          )}
           {!items.length && lastSale && (
             <div ref={lastSaleRef} style={{ background: "#eaf6ee", border: "0.5px solid #1a8c3e55", borderRadius: 10, padding: ".7rem", marginBottom: ".9rem" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#1a8c3e", marginBottom: 4 }}>✓ آخر عملية — فاتورة #{lastSale.invoice.id}</div>
@@ -490,7 +525,31 @@ export default function POS({ ctx, can, go }) {
                   <div key={k} onClick={() => setPay(k)} style={{ gridColumn: (k === "defer" || k === "employee") ? "1/-1" : "auto", border: `1px solid ${pay === k ? C.gold : C.bc}`, borderRadius: 8, padding: ".45rem .6rem", cursor: "pointer", fontSize: 12, fontWeight: pay === k ? 600 : 500, background: pay === k ? "rgba(201,168,76,.12)" : C.crm, color: pay === k ? C.grn2 : C.k2, textAlign: "center" }}>{l}</div>
                 ))}
               </div>
-              {pay === "cash" && (
+              {splitAllowed && (
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, cursor: "pointer", color: C.k2 }}>
+                    <input type="checkbox" checked={splitOn} onChange={e => { setSplitOn(e.target.checked); setSplitAmount(""); }} />
+                    دفع مقسَّم على طريقتين
+                  </label>
+                  {splitOn && (
+                    <div style={{ marginTop: 6, background: C.bluebg, border: `0.5px solid ${C.blue}44`, borderRadius: 10, padding: ".7rem" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: C.blue, whiteSpace: "nowrap" }}>{PAY_LABEL[pay]}</span>
+                        <input type="number" min="0" value={splitAmount} onChange={e => setSplitAmount(e.target.value)} placeholder="المبلغ" style={{ ...inputStyle, flex: 1 }} />
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <Sel value={splitMethod2} onChange={e => setSplitMethod2(e.target.value)} style={{ flex: 1 }}>
+                          {PAY_METHODS.filter(m => m !== PAY_LABEL[pay]).map(m => <option key={m} value={m}>{m}</option>)}
+                        </Sel>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: splitFirst > 0 && splitFirst < total ? C.grn2 : C.mt, minWidth: 70, textAlign: "left" }}>
+                          {splitFirst > 0 && splitFirst < total ? `${fmt(splitRest)} ${cur}` : "الباقي"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {pay === "cash" && !splitActive && (
                 <div style={{ marginTop: 8, background: "#eaf6ee", border: "0.5px solid #1a8c3e55", borderRadius: 10, padding: ".7rem" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#1a8c3e", marginBottom: 6 }}>حاسبة الباقي</div>
                   <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>

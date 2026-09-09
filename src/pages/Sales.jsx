@@ -180,6 +180,9 @@ export default function Sales({ ctx, can }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 14, background: C.crm, borderRadius: 10, padding: ".8rem 1rem" }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>المصدر</span><Badge tone={SRC_TONE[detail.source] || "b"}>{detail.source}</Badge></div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>طريقة الدفع</span><Badge tone={PAY_TONE[detail.pay] || "g"}>{detail.pay}</Badge></div>
+            {Array.isArray(detail.payParts) && detail.payParts.map((pt, n) => (
+              <div key={n} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span style={{ color: C.mt }}>— {pt.method}</span><span>{fmt(pt.amount)} {cur}</span></div>
+            ))}
             {detail.discount && detail.discount !== "—" && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>الخصم</span><span>{detail.discount}</span></div>}
             {detail.dueDate && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>تاريخ الاستحقاق</span><span>{arDate(detail.dueDate)}</span></div>}
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}><span style={{ color: C.mt }}>بواسطة</span><span>{detail.by || "—"}</span></div>

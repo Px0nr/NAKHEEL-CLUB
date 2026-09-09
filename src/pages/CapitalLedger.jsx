@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { PageTop, Btn, KCard, Card, CardHead, Table, Badge, Modal, Field, Inp, Sel } from "../components/ui.jsx";
 import { todayISO, arDate } from "../utils/format.js";
+import { payBreakdown } from "../utils/payments.js";
 import { DB } from "../db/db.js";
 
 /* ============================ CAPITAL LEDGER (رأس المال والسيولة) ============================ */
@@ -33,7 +34,11 @@ export default function CapitalLedger({ ctx }) {
       ev.push({ date: m.date, type: m.type, desc: m.note || m.type, method: m.method, amount: m.type === "سحب مالك" ? -m.amount : m.amount, by: m.by, sortKey: m.id });
     });
     invoices.filter(i => i.status === "مدفوعة" && i.pay !== "آجل").forEach(i => {
-      ev.push({ date: i.date, type: "بيع", desc: `فاتورة #${i.id} — ${i.customer}`, method: i.pay, amount: i.total, by: i.by, sortKey: String(i.id) });
+      // الفاتورة المقسَّمة تدخل الدفتر كحركة لكل طريقة — قيدها كمبلغ واحد على
+      // طريقة واحدة يخلط النقد بالبطاقة في رصيد الخزينة
+      payBreakdown(i).forEach((pt, n) => {
+        ev.push({ date: i.date, type: "بيع", desc: `فاتورة #${i.id} — ${i.customer}`, method: pt.method, amount: pt.amount, by: i.by, sortKey: String(i.id) + ":" + n });
+      });
     });
     payments.filter(p => p.kind === "قبض").forEach(p => {
       ev.push({ date: p.date, type: "تحصيل دين", desc: `من ${p.party}`, method: p.via, amount: p.amount, by: p.by, sortKey: p.id });
