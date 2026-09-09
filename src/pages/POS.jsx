@@ -11,6 +11,7 @@ import { promoFor } from "../utils/promos.js";
 import { applyReversal } from "../utils/invoiceReversal.js";
 import { loadCart, saveCart } from "../utils/posCart.js";
 import { buildSplit, PAY_METHODS } from "../utils/payments.js";
+import { couponActive } from "../utils/coupons.js";
 
 const qbtn = { width: 22, height: 22, borderRadius: 6, border: `0.5px solid ${C.bc}`, background: C.crm, cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
 const posUnitBtn = (primary) => ({ flex: 1, padding: ".28rem .3rem", borderRadius: 6, fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${primary ? C.gold : C.bc}`, background: primary ? C.gold + "18" : C.crm, color: primary ? C.gdd : C.k2, whiteSpace: "nowrap" });
@@ -18,7 +19,7 @@ const Row = ({ label, val, color }) => <div style={{ display: "flex", justifyCon
 
 /* ============================ POS ============================ */
 export default function POS({ ctx, can, go }) {
-  const { products, setProducts, invoices, setInvoices, coupons, customers, setCustomers, employees, promotions, user, showToast, settings, parkedSales, setParkedSales } = ctx;
+  const { products, setProducts, invoices, setInvoices, coupons, setCoupons, customers, setCustomers, employees, promotions, user, showToast, settings, parkedSales, setParkedSales } = ctx;
   const cur = settings?.currency || "د.ل";
   // السلة تُستعاد من تخزين الجهاز عند فتح الصفحة (تحديث الصفحة أو انقطاع كهرباء
   // كان يمسحها). الاستعادة تُطابَق مع الواقع الحالي أولاً — انظر utils/posCart.js
@@ -31,6 +32,7 @@ export default function POS({ ctx, can, go }) {
   const [pay, setPay] = useState("cash");
   const [coupon, setCoupon] = useState("");
   const [discPct, setDiscPct] = useState(0);
+  const [appliedCoupon, setAppliedCoupon] = useState(null); // { id, code } — الكوبون الفعلي المطبَّق حالياً، لتحديث عداد استخدامه عند إتمام البيع
   const [catFilter, setCatFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [bcInput, setBcInput] = useState("");
@@ -220,10 +222,20 @@ export default function POS({ ctx, can, go }) {
     gsap.from(lastSaleRef.current, { autoAlpha: 0, scale: 0.94, duration: m.d(D.base), ease: EASE, clearProps: "scale" });
   }, { dependencies: [lastSale?.invoice?.id] });
 
+  // كانت تتحقق فقط من status==="نشط" — فكوبون منتهي الصلاحية أو تجاوز حد
+  // استخدامه المفترض كان يُطبَّق بلا أي مانع فعلي (couponActive تفحص الثلاثة معاً)
   const applyCoupon = () => {
-    const c = coupons.find(x => x.code === coupon.trim().toUpperCase() && x.status === "نشط");
-    if (c) { setDiscPct(c.pct); showToast(`كوبون ${c.code} مفعّل — خصم ${c.pct}%`); }
-    else { setDiscPct(0); showToast("كود الخصم غير صحيح"); }
+    const code = coupon.trim().toUpperCase();
+    const c = coupons.find(x => x.code === code);
+    if (!c) { setDiscPct(0); setAppliedCoupon(null); showToast("كود الخصم غير صحيح"); return; }
+    if (!couponActive(c)) {
+      const reason = c.status !== "نشط" ? "هذا الكوبون معطَّل"
+        : (c.exp && c.exp < todayISO()) ? "انتهت صلاحية هذا الكوبون"
+        : "بلغ هذا الكوبون حد الاستخدام المسموح";
+      setDiscPct(0); setAppliedCoupon(null); showToast(reason); return;
+    }
+    setDiscPct(c.pct); setAppliedCoupon({ id: c.id, code: c.code });
+    showToast(`كوبون ${c.code} مفعّل — خصم ${c.pct}%`);
   };
 
   const checkout = () => {
@@ -279,11 +291,14 @@ export default function POS({ ctx, can, go }) {
     // pieces: عدد القطع المخصومة فعلاً من المخزون لهذا السطر (qty قد يكون بالعلبة).
     // بدونه لا يستطيع إلغاء الفاتورة لاحقاً من سجل المبيعات إعادة الكمية الصحيحة —
     // انظر utils/invoiceReversal.js
-    const inv = { id: num, customer: custName, customerId: custId, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, pieces: it.qty * it.perPieces, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), loyaltyEarned, loyaltyRedeemed, pay: split ? split.label : PAY_LABEL[pay], ...(split ? { payParts: split.parts } : {}), discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}) };
+    const inv = { id: num, customer: custName, customerId: custId, date: todayISO(), source: "منتج", details, items: items.map(it => ({ pid: it.pid, cat: it.cat, name: it.name, qty: it.qty, pieces: it.qty * it.perPieces, lineTotal: isFreeItem(it) ? 0 : Math.round(it.unitPrice * it.qty * 100) / 100, free: isFreeItem(it) || undefined })), loyaltyEarned, loyaltyRedeemed, pay: split ? split.label : PAY_LABEL[pay], ...(split ? { payParts: split.parts } : {}), discount: [discPct ? discPct + "%" : "", pointsDiscount ? `نقاط -${fmt(pointsDiscount)}` : "", freeValue > 0 ? `مزايا مجانية -${fmt(freeValue)}` : ""].filter(Boolean).join(" + ") || "—", total, cost: Math.round(cost * 100) / 100, status: pay === "defer" ? "معلقة" : "مدفوعة", by: user?.name || "—", time: new Date().toTimeString().slice(0, 5), ...(pay === "defer" ? { dueDate: dueDate || todayISO() } : {}), ...(pay === "employee" ? { empId: deferEmployee.id } : {}), ...(appliedCoupon ? { couponId: appliedCoupon.id, coupon: appliedCoupon.code } : {}) };
     setInvoices(iv => [inv, ...iv]);
+    // يُحدَّث عداد استخدام الكوبون هنا فقط — عند إتمام بيع فعلي، لا عند مجرّد
+    // تطبيقه في applyCoupon — فكان يبقى صفراً للأبد بلا أي ربط بالبيع الحقيقي
+    if (appliedCoupon) setCoupons(cs => cs.map(x => x.id === appliedCoupon.id ? { ...x, used: (x.used || 0) + 1 } : x));
     showToast(pay === "defer" ? `فاتورة آجلة #${num} على ${custName} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}` : pay === "employee" ? `فاتورة موظف #${num} على ${custName} — ${fmt(total)} ${cur}${freeValue > 0 ? ` (مزايا مجانية ${fmt(freeValue)} ${cur})` : ""}` : `تم إنشاء الفاتورة #${num} — ${fmt(total)} ${ctx.settings?.currency || "د.ل"}`);
     setLastSale({ invoice: inv, stockDeltas, isDefer: pay === "defer", deferCustId: pay === "defer" ? deferCustomer.id : null, loyaltyCustId: custForPoints ? custForPoints.id : null, loyaltyEarned, loyaltyRedeemed });
-    setCart({}); setDiscPct(0); setCoupon(""); setDeferCustomer(null); setDueDate(""); setPointsCustomer(null); setRedeemPoints(false); setDeferEmployee(null); setCashReceived(""); setSplitOn(false); setSplitAmount("");
+    setCart({}); setDiscPct(0); setCoupon(""); setAppliedCoupon(null); setDeferCustomer(null); setDueDate(""); setPointsCustomer(null); setRedeemPoints(false); setDeferEmployee(null); setCashReceived(""); setSplitOn(false); setSplitAmount("");
   };
 
   // مرجع دائم التحديث لأحدث checkout — نفس سبب addByCodeRef أعلاه: المستمع العالمي
@@ -307,6 +322,9 @@ export default function POS({ ctx, can, go }) {
     if (!(await ctx.confirm(`التراجع عن الفاتورة #${lastSale.invoice.id} نهائياً؟ سيُعاد المخزون المخصوم وأي دين أو نقاط ولاء مرتبطة بها.`, { danger: true }))) return;
     applyReversal(lastSale.invoice, { setProducts, setCustomers });
     setInvoices(iv => iv.filter(i => i.id !== lastSale.invoice.id));
+    // التراجع عن فاتورة استخدمت كوبوناً يُعيد له استخدامه — وإلا يبقى العداد
+    // محتسباً بيعاً أُلغي فعلياً
+    if (lastSale.invoice.couponId != null) setCoupons(cs => cs.map(x => x.id === lastSale.invoice.couponId ? { ...x, used: Math.max(0, (x.used || 0) - 1) } : x));
     showToast(`تم التراجع عن الفاتورة #${lastSale.invoice.id}`);
     setLastSale(null);
   };
@@ -327,14 +345,14 @@ export default function POS({ ctx, can, go }) {
   // تعليق السلة الحالية مؤقتاً (مثلاً حين يبتعد الزبون) — تُحفظ ويُفرَّغ العمل الحالي لخدمة زبون آخر فوراً
   const parkSale = () => {
     if (!items.length) return;
-    setParkedSales(ps => [{ id: "PK-" + Date.now(), ts: new Date().toISOString(), label: parkLabel.trim(), cart, discPct, coupon, pay, count: items.reduce((s, i) => s + i.qty, 0), total }, ...ps]);
-    setCart({}); setDiscPct(0); setCoupon(""); setCashReceived(""); setSplitOn(false); setSplitAmount(""); setParkPrompt(false); setParkLabel("");
+    setParkedSales(ps => [{ id: "PK-" + Date.now(), ts: new Date().toISOString(), label: parkLabel.trim(), cart, discPct, coupon, appliedCoupon, pay, count: items.reduce((s, i) => s + i.qty, 0), total }, ...ps]);
+    setCart({}); setDiscPct(0); setCoupon(""); setAppliedCoupon(null); setCashReceived(""); setSplitOn(false); setSplitAmount(""); setParkPrompt(false); setParkLabel("");
     showToast("عُلِّقت الفاتورة — يمكنك استئنافها لاحقاً من الأعلى");
   };
   // استئناف فاتورة معلَّقة: يستبدل سلة العمل الحالية (إن كانت فيها أصناف تُفقد — نحذّر أولاً)
   const resumeSale = async (pk) => {
     if (items.length && !(await ctx.confirm("سيستبدل استئناف هذه الفاتورة سلة العمل الحالية غير المكتملة. متابعة؟", { danger: true }))) return;
-    setCart(pk.cart); setDiscPct(pk.discPct); setCoupon(pk.coupon); setPay(pk.pay);
+    setCart(pk.cart); setDiscPct(pk.discPct); setCoupon(pk.coupon); setAppliedCoupon(pk.appliedCoupon || null); setPay(pk.pay);
     setParkedSales(ps => ps.filter(x => x.id !== pk.id));
   };
   const discardParked = async (pk) => {

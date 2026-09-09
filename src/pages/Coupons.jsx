@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { C } from "../constants/theme.js";
+import { C, fmt } from "../constants/theme.js";
 import { PageTop, Btn, Badge, Modal, Field, Inp } from "../components/ui.jsx";
 import { arDate, todayISO } from "../utils/format.js";
+import { couponState, COUPON_STATE_TONE } from "../utils/coupons.js";
 
 /* ============================ COUPONS ============================ */
 export default function Coupons({ ctx }) {
-  const { coupons, setCoupons, showToast } = ctx;
+  const { coupons, setCoupons, invoices, showToast, confirm } = ctx;
+  const cur = ctx.settings?.currency || "د.ل";
   const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState(null); // كوبون قيد التعديل — null يعني إنشاء جديد
   const [printModal, setPrintModal] = useState(null);
   const [printHistory, setPrintHistory] = useState(() => {
     try {
@@ -17,6 +20,13 @@ export default function Coupons({ ctx }) {
   });
   const [f, setF] = useState({ code: "", desc: "", pct: "", limit: "", exp: "" });
 
+  const openAdd = () => { setEditing(null); setF({ code: "", desc: "", pct: "", limit: "", exp: "" }); setModal(true); };
+  const openEdit = (c) => { setEditing(c); setF({ code: c.code, desc: c.desc || "", pct: String(c.pct), limit: String(c.limit), exp: c.exp }); setModal(true); };
+
+  // إيرادات هذا الكوبون فعلياً — كان لا يوجد أي رابط بين استخدام الكوبون والفاتورة
+  // التي استُخدم فيها، فلا يمكن قياس أثره الحقيقي على المبيعات
+  const couponRevenue = (c) => invoices.filter(iv => iv.couponId === c.id || iv.coupon === c.code).reduce((s, iv) => s + iv.total, 0);
+
   const save = () => {
     if (!f.code.trim() || !f.pct) {
       showToast("أدخل الكود ونسبة الخصم");
@@ -26,21 +36,39 @@ export default function Coupons({ ctx }) {
       showToast("حدد تاريخ الانتهاء");
       return;
     }
-    const newCoupon = {
-      id: Date.now(),
-      code: f.code.toUpperCase(),
-      desc: f.desc,
-      pct: parseInt(f.pct),
-      used: 0,
-      limit: parseInt(f.limit) || 100,
-      exp: f.exp,
-      status: "نشط",
-      createdAt: todayISO(),
-    };
-    setCoupons((c) => [...c, newCoupon]);
-    showToast("✓ تم إنشاء الكوبون");
+    // نسبة خصم بلا حدود كانت تقبل قيماً سالبة أو أكبر من 100% بلا أي تحقق
+    const pct = parseInt(f.pct);
+    if (!(pct >= 1 && pct <= 100)) { showToast("نسبة الخصم يجب أن تكون بين 1% و100%"); return; }
+    const limit = parseInt(f.limit) || 100;
+    if (limit < 1) { showToast("حد الاستخدام يجب أن يكون 1 على الأقل"); return; }
+    const code = f.code.toUpperCase().trim();
+    // لا تحقق سابقاً من تكرار الكود — كوبونان بنفس الكود كانا يتطابقان معاً في
+    // نقطة البيع بصمت، فيُطبَّق أولهما دائماً بلا أي تنبيه عن التكرار
+    const dup = coupons.find(x => x.code === code && x.id !== editing?.id);
+    if (dup) { showToast(`الكود «${code}» مستخدم بالفعل لكوبون آخر`); return; }
+
+    if (editing) {
+      setCoupons(cs => cs.map(x => x.id === editing.id ? { ...x, code, desc: f.desc, pct, limit, exp: f.exp } : x));
+      showToast("✓ تم تحديث الكوبون");
+    } else {
+      const newCoupon = { id: Date.now(), code, desc: f.desc, pct, used: 0, limit, exp: f.exp, status: "نشط", createdAt: todayISO() };
+      setCoupons((c) => [...c, newCoupon]);
+      showToast("✓ تم إنشاء الكوبون");
+    }
     setModal(false);
+    setEditing(null);
     setF({ code: "", desc: "", pct: "", limit: "", exp: "" });
+  };
+
+  // تعطيل/تفعيل يدوي — لم تكن هناك وسيلة لإيقاف كوبون مبكراً سوى حذفه نهائياً
+  const toggleActive = (c) => {
+    setCoupons(cs => cs.map(x => x.id === c.id ? { ...x, status: x.status === "نشط" ? "معطّل" : "نشط" } : x));
+    showToast(c.status === "نشط" ? "تم تعطيل الكوبون" : "تم تفعيل الكوبون");
+  };
+  const deleteCoupon = async (c) => {
+    if (!(await confirm(`حذف الكوبون «${c.code}» نهائياً؟`))) return;
+    setCoupons(cs => cs.filter(x => x.id !== c.id));
+    showToast("تم حذف الكوبون");
   };
 
   const handlePrint = (coupon) => {
@@ -158,7 +186,7 @@ export default function Coupons({ ctx }) {
         title="كوبونات الخصم"
         action={
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn gold onClick={() => setModal(true)}>
+            <Btn gold onClick={openAdd}>
               + إنشاء كوبون
             </Btn>
             {printHistory.length > 0 && (
@@ -214,29 +242,33 @@ export default function Coupons({ ctx }) {
                     {c.desc}
                   </div>
                   <div style={{ fontSize: 10, color: C.k2, marginTop: 4 }}>
-                    استُخدم {c.used} / {c.limit} مرة
+                    استُخدم {c.used || 0} / {c.limit} مرة
+                  </div>
+                  <div style={{ fontSize: 10, color: C.mt, marginTop: 2 }}>
+                    إيراد الفواتير المرتبطة: {fmt(couponRevenue(c))} {cur}
                   </div>
                 </div>
                 <div style={{ textAlign: "left" }}>
-                  <Badge tone={c.status === "نشط" ? "g" : "r"}>
-                    {c.status}
+                  <Badge tone={COUPON_STATE_TONE[couponState(c)]}>
+                    {couponState(c)}
                   </Badge>
                   <div style={{ fontSize: 10, color: C.mt, marginTop: 5 }}>
                     ينتهي {arDate(c.exp)}
                   </div>
                 </div>
               </div>
-              <Btn
-                gold
-                onClick={() => handlePrint(c)}
-                style={{
-                  justifyContent: "center",
-                  fontSize: 12,
-                  padding: "8px 12px",
-                }}
-              >
-                🖨️ طباعة كوبون
-              </Btn>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <Btn
+                  gold
+                  onClick={() => handlePrint(c)}
+                  style={{ flex: 1, justifyContent: "center", fontSize: 12, padding: "8px 12px" }}
+                >
+                  🖨️ طباعة
+                </Btn>
+                <Btn sm onClick={() => openEdit(c)}>✎ تعديل</Btn>
+                <Btn sm onClick={() => toggleActive(c)}>{c.status === "نشط" ? "⏸ تعطيل" : "▶ تفعيل"}</Btn>
+                <Btn sm danger onClick={() => deleteCoupon(c)}>🗑 حذف</Btn>
+              </div>
             </div>
           ))
         ) : (
@@ -247,7 +279,7 @@ export default function Coupons({ ctx }) {
       </div>
 
       {modal && (
-        <Modal title="إنشاء كوبون جديد" onClose={() => setModal(false)} width={440}>
+        <Modal title={editing ? `تعديل كوبون — ${editing.code}` : "إنشاء كوبون جديد"} onClose={() => { setModal(false); setEditing(null); }} width={440}>
           <Field label="كود الكوبون">
             <Inp
               value={f.code}
@@ -289,9 +321,9 @@ export default function Coupons({ ctx }) {
           </Field>
           <div style={{ display: "flex", gap: 8 }}>
             <Btn gold onClick={save} style={{ flex: 1, justifyContent: "center" }}>
-              ✓ حفظ
+              ✓ {editing ? "حفظ التعديلات" : "حفظ"}
             </Btn>
-            <Btn onClick={() => setModal(false)}>إلغاء</Btn>
+            <Btn onClick={() => { setModal(false); setEditing(null); }}>إلغاء</Btn>
           </div>
         </Modal>
       )}
