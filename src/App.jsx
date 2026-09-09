@@ -667,7 +667,7 @@ function NakheelApp() {
         {page === "bookings" && <Bookings ctx={ctx} />}
         {page === "tournaments" && <Tournaments ctx={ctx} />}
         {page === "suppliers" && <Suppliers ctx={ctx} />}
-        {page === "customers" && <Customers ctx={ctx} />}
+        {page === "customers" && <Customers ctx={ctx} go={setPage} />}
         {page === "alerts" && <Alerts ctx={ctx} />}
         {page === "coupons" && <Coupons ctx={ctx} />}
         {page === "promos" && <Promotions ctx={ctx} />}
