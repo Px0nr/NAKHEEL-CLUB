@@ -229,6 +229,44 @@ export default function Reports({ ctx }) {
         chart: rows.length ? { data: sorted.slice(0, 8).map(r => ({ label: r.label, value: r.net })), color: C.grl } : null };
     }
 
+    if (type === "productMargin") {
+      // نفس منهج صافي ربح الأقسام أعلاه لكن على مستوى الصنف الفردي — يكشف منتجات
+      // «تُباع كثيراً لكن هامشها ضعيف»، لا تظهرها التصنيفات القطاعية في deptProfit
+      const stats = {};
+      invoices.filter(i => i.status === "مدفوعة" && inRange(i.date)).forEach(i => {
+        (i.items || []).forEach(it => {
+          if (it.pid == null) return;
+          if (!stats[it.pid]) stats[it.pid] = { pid: it.pid, name: it.name, cat: it.cat, qty: 0, revenue: 0 };
+          stats[it.pid].qty += it.qty;
+          stats[it.pid].revenue += it.lineTotal || 0;
+        });
+      });
+      // أصناف مجانية بالكامل (مزايا موظفين) بلا إيراد — لا هامش يُحسب منها، تُستثنى
+      const rows = Object.values(stats).filter(s => s.revenue > 0).map(s => {
+        const prod = products.find(p => p.id === s.pid);
+        const cost = (prod?.buy || 0) * s.qty;
+        const profit = s.revenue - cost;
+        return { ...s, catLabel: cats[s.cat] || s.cat || "—", cost, profit, marginPct: Math.round((profit / s.revenue) * 100) };
+      });
+      // الأضعف هامشاً أولاً — هذا هو غرض التقرير: كشف ما يُباع كثيراً بربح ضعيف، لا تكرار ترتيب الإيراد الموجود في تقارير أخرى
+      const byMargin = [...rows].sort((a, b) => a.marginPct - b.marginPct);
+      const byProfit = [...rows].sort((a, b) => b.profit - a.profit);
+      const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
+      const totalProfit = rows.reduce((s, r) => s + r.profit, 0);
+      const best = byProfit.length ? [...rows].sort((a, b) => b.marginPct - a.marginPct)[0] : null;
+      const worst = byMargin[0];
+      return { title: "هامش الربح لكل منتج", headline: totalProfit,
+        summary: [
+          ["إجمالي الربح", fmt(totalProfit) + " " + cur],
+          ["متوسط الهامش", (totalRevenue ? Math.round((totalProfit / totalRevenue) * 100) : 0) + "%"],
+          ["أعلى هامش", best ? `${best.name} — ${best.marginPct}%` : "—"],
+          ["أضعف هامش", worst ? `${worst.name} — ${worst.marginPct}%` : "—"],
+        ],
+        thead: ["المنتج", "القسم", "الكمية المباعة", "الإيراد", "التكلفة", "الربح", "الهامش %"],
+        tbody: byMargin.length ? byMargin.map(r => [r.name, r.catLabel, r.qty, fmt(r.revenue) + " " + cur, fmt(r.cost) + " " + cur, fmt(r.profit) + " " + cur, r.marginPct + "%"]) : [["لا مبيعات منتجات مفصَّلة ضمن الفترة المختارة", "", "", "", "", "", ""]],
+        chart: byProfit.length ? { data: byProfit.slice(0, 8).map(r => ({ label: r.name, value: r.profit })), color: C.grl } : null };
+    }
+
     if (type === "catSales") {
       const catKey = cat || Object.keys(cats)[0] || "";
       const catLabel = cats[catKey] || catKey;
@@ -451,6 +489,7 @@ export default function Reports({ ctx }) {
             <option value="peakHours">ساعات الذروة</option>
             <option value="rentals">تأجير الأجهزة</option>
             <option value="deptProfit">صافي ربح الأقسام</option>
+            <option value="productMargin">هامش الربح لكل منتج</option>
             <option value="assets">موارد النادي</option>
             <option value="customers">تقرير الزبائن</option>
           </Sel>
