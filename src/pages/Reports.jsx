@@ -51,7 +51,7 @@ export default function Reports({ ctx }) {
   const printRef = useRef(null);
   // تقرير الزبائن لقطة لحالة النظام الآن (دَين حالي، آخر زيارة إجمالية) لا حركة ضمن فترة —
   // نفس منطق "products" و"assets" أدناه، فلا يُقيَّد بنطاق تاريخ
-  const rangeless = type === "assets" || type === "products" || type === "customers";
+  const rangeless = type === "assets" || type === "products" || type === "customers" || type === "stockValuation";
 
   // بنّاء التقرير كدالة نقية على نطاق زمني — تُستدعى مرتين (الفترة الحالية وفترة مقارنة مساوية الطول قبلها مباشرة)
   // لإتاحة مقارنة الفترتين دون تكرار منطق كل تقرير من الأربعة عشر
@@ -98,6 +98,31 @@ export default function Reports({ ctx }) {
       const total = rows.reduce((s, e) => s + e.amount, 0);
       return { title: "تقرير المصاريف", headline: total, summary: [["إجمالي المصاريف", fmt(total) + " " + cur], ["عدد البنود", rows.length], ["أكبر فئة", top ? top[0] : "—"]], thead: ["التاريخ", "الفئة", "الوصف", "المبلغ"], tbody: rows.map(e => [arDate(e.date), e.cat, e.desc, fmt(e.amount) + " " + cur]),
         chart: ranked.length ? { data: ranked.slice(0, 8).map(([label, value]) => ({ label, value })), color: C.red } : null };
+    }
+
+    if (type === "stockValuation") {
+      // لقطة حالة حالية (كتقريري المنتجات والموارد) — قيمة المخزون الآن، لا حركة ضمن فترة.
+      // الاستبعاد بـ stock !== null يستثني الخدمات (بلا مخزون فعلي يُقيَّم)
+      const rows = products.filter(p => p.stock !== null).map(p => ({
+        ...p, catLabel: cats[p.cat] || p.cat || "—", value: (p.stock || 0) * (p.buy || 0),
+      })).sort((a, b) => b.value - a.value);
+      const totalValue = rows.reduce((s, p) => s + p.value, 0);
+      const totalUnits = rows.reduce((s, p) => s + (p.stock || 0), 0);
+      const byCat = {};
+      rows.forEach(p => { byCat[p.catLabel] = (byCat[p.catLabel] || 0) + p.value; });
+      const catRanked = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+      const top = rows[0];
+      return { title: "تقييم المخزون الحالي", headline: totalValue,
+        summary: [
+          ["القيمة الإجمالية للمخزون", fmt(totalValue) + " " + cur],
+          ["عدد القطع", fmt(totalUnits)],
+          ["عدد الأصناف المُقيَّمة", rows.length],
+          ["الأعلى قيمة", top ? top.name : "—"],
+        ],
+        thead: ["المنتج", "القسم", "المخزون (قطعة)", "سعر الشراء", "القيمة الإجمالية"],
+        tbody: rows.length ? rows.map(p => [p.name, p.catLabel, p.stock, fmt(p.buy || 0) + " " + cur, fmt(p.value) + " " + cur]) : [["لا منتجات ذات مخزون فعلي بعد", "", "", "", ""]],
+        thead2: ["القسم", "قيمة المخزون"], tbody2: catRanked.map(([label, value]) => [label, fmt(value) + " " + cur]), title2: "القيمة حسب القسم",
+        chart: catRanked.length ? { data: catRanked.map(([label, value]) => ({ label, value })), color: C.gold } : null };
     }
 
     if (type === "assets") {
@@ -482,6 +507,7 @@ export default function Reports({ ctx }) {
             <option value="purchases">تقرير المشتريات</option>
             <option value="profit">الأرباح والخسائر</option>
             <option value="products">مبيعات المنتجات</option>
+            <option value="stockValuation">تقييم المخزون الحالي</option>
             <option value="expenses">تقرير المصاريف</option>
             <option value="waste">الإتلاف والهالك</option>
             <option value="leaderboard">تصنيف الموظفين</option>
