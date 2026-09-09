@@ -218,6 +218,7 @@ function NakheelApp() {
   const [rentalDevices, setRentalDevices] = usePersistentState("rentalDevices", []); // أجهزة إلكترونية للتأجير
   const [rentals, setRentals] = usePersistentState("rentals", []); // عمليات التأجير
   const [deductions, setDeductions] = usePersistentState("deductions", []); // خصومات وجزاءات الموظفين (تأخير، مخالفات...)
+  const [salarySettlements, setSalarySettlements] = usePersistentState("salarySettlements", []); // أرشيف دورات الرواتب المصفّاة — كانت التصفية تصفّر كل شيء بلا أي أثر تاريخي
   const [capitalMoves, setCapitalMoves] = usePersistentState("capitalMoves", []); // ضخ/سحب رأس المال (سيولة خارج دورة البيع والمصاريف)
   const [reportPresets, setReportPresets] = usePersistentState("reportPresets", []); // إعدادات تقارير محفوظة/مفضّلة
   const [users, setUsers] = usePersistentState("users", SEED_USERS);
@@ -416,7 +417,7 @@ function NakheelApp() {
     auditLog, setAuditLog, parkedSales, setParkedSales,
     rentalDevices, setRentalDevices,
     rentals, setRentals,
-    deductions, setDeductions,
+    deductions, setDeductions, salarySettlements, setSalarySettlements,
     capitalMoves, setCapitalMoves,
     reportPresets, setReportPresets,
     bookings, setBookings, completedBookings, setCompletedBookings, tables, setTables,
