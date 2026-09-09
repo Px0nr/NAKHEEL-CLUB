@@ -9,6 +9,7 @@ import { openPdfDoc } from "../components/pdfHook.js";
 import { todayISO, matchesBarcode, matchesBarcodePartial } from "../utils/format.js";
 import { promoFor } from "../utils/promos.js";
 import { applyReversal } from "../utils/invoiceReversal.js";
+import { loadCart, saveCart } from "../utils/posCart.js";
 
 const qbtn = { width: 22, height: 22, borderRadius: 6, border: `0.5px solid ${C.bc}`, background: C.crm, cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
 const posUnitBtn = (primary) => ({ flex: 1, padding: ".28rem .3rem", borderRadius: 6, fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${primary ? C.gold : C.bc}`, background: primary ? C.gold + "18" : C.crm, color: primary ? C.gdd : C.k2, whiteSpace: "nowrap" });
@@ -18,7 +19,14 @@ const Row = ({ label, val, color }) => <div style={{ display: "flex", justifyCon
 export default function POS({ ctx, can, go }) {
   const { products, setProducts, invoices, setInvoices, coupons, customers, setCustomers, employees, promotions, user, showToast, settings, parkedSales, setParkedSales } = ctx;
   const cur = settings?.currency || "د.ل";
-  const [cart, setCart] = useState({});
+  // السلة تُستعاد من تخزين الجهاز عند فتح الصفحة (تحديث الصفحة أو انقطاع كهرباء
+  // كان يمسحها). الاستعادة تُطابَق مع الواقع الحالي أولاً — انظر utils/posCart.js
+  const restoredRef = useRef(null);
+  const [cart, setCart] = useState(() => {
+    const res = loadCart(products);
+    if (Object.keys(res.cart).length) restoredRef.current = res;
+    return res.cart;
+  });
   const [pay, setPay] = useState("cash");
   const [coupon, setCoupon] = useState("");
   const [discPct, setDiscPct] = useState(0);
@@ -34,6 +42,25 @@ export default function POS({ ctx, can, go }) {
   const [deferEmployee, setDeferEmployee] = useState(null);
   const [cashReceived, setCashReceived] = useState("");
   const [lastSale, setLastSale] = useState(null); // آخر عملية بيع مكتملة — لإتاحة الإيصال الفوري والتراجع
+
+  // حفظ السلة على الجهاز مع كل تغيير. لا حاجة لمسحٍ صريح عند إتمام البيع أو
+  // التعليق: تفريغها يمرّ من هنا أيضاً وsaveCart يمسح المخزَّن حين تكون فارغة
+  useEffect(() => { saveCart(cart); }, [cart]);
+
+  // إخطار الكاشير بما استُعيد وبما سقط منه — الصمت هنا يعني إتمام بيع بكمية
+  // ناقصة أو بلا صنف كان في السلة دون أن ينتبه أحد
+  useEffect(() => {
+    const r = restoredRef.current;
+    if (!r) return;
+    restoredRef.current = null;
+    const notes = [];
+    if (r.dropped.length) notes.push(`أُسقط ${r.dropped.length} صنف لم يعد متاحاً`);
+    if (r.clamped.length) notes.push(`عُدِّلت كمية ${r.clamped.length} صنف حسب المخزون`);
+    showToast(`استُعيدت السلة غير المكتملة${notes.length ? " — " + notes.join("، ") : ""}`);
+    // مرة واحدة عند الفتح فقط: showToast تُعاد صياغتها كل رندر، وإدراجها هنا
+    // يجعل الإخطار يتكرّر بلا داعٍ (والحارس restoredRef يمنع تكراره أصلاً)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const PAY_LABEL = { cash: "كاش", card: "بطاقة", transfer: "تحويل", defer: "آجل", employee: "موظف" };
   const shown = products.filter(p =>
