@@ -36,6 +36,7 @@ export default function Bookings({ ctx }) {
   settingsRef.current = settings;
   const alarmedRef = useRef({}); // bookingId -> وقت آخر تنبيه صوتي
   const ALARM_REPEAT_MS = 30000; // يتكرّر كل نصف دقيقة حتى تُنهى الطاولة
+  const WARNING_MS = 5 * 60000; // آخر 5 دقائق من الحجز تُعرض بلون تحذيري كهرماني
   useEffect(() => {
     const t = setInterval(() => {
       force(x => x + 1);
@@ -282,12 +283,18 @@ export default function Bookings({ ctx }) {
                     {b.prepaid ? (() => {
                       const remainMs = (b.startTime + b.durationMin * 60000) - Date.now();
                       const over = remainMs <= 0;
+                      // تحذير قبل انتهاء الوقت فعلياً — آخر 5 دقائق تتحوّل كهرمانية
+                      // بدل الانتقال المفاجئ من أخضر إلى أحمر بلا أي إنذار مسبق
+                      const warning = !over && remainMs <= WARNING_MS;
                       const rm = Math.abs(remainMs);
                       const mm = Math.floor(rm / 60000), ss = Math.floor((rm % 60000) / 1000);
+                      const clockColor = over ? "#e34948" : warning ? "#8a6a20" : C.grn2;
+                      const labelColor = over ? "#e34948" : warning ? "#8a6a20" : "#1a8c3e";
+                      const labelText = over ? "⏰ انتهى الوقت!" : warning ? "⚠ اقترب انتهاء الوقت" : "متبقٍ من الحجز";
                       return (
                         <>
-                          <div style={{ fontSize: 21, fontWeight: 700, color: over ? "#e34948" : C.grn2, fontFamily: "monospace", letterSpacing: 1, margin: ".4rem 0" }}>{over ? "-" : ""}{String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}</div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: over ? "#e34948" : "#1a8c3e" }}>{over ? "⏰ انتهى الوقت!" : "متبقٍ من الحجز"}</div>
+                          <div style={{ fontSize: 21, fontWeight: 700, color: clockColor, fontFamily: "monospace", letterSpacing: 1, margin: ".4rem 0" }}>{over ? "-" : ""}{String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}</div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: labelColor }}>{labelText}</div>
                         </>
                       );
                     })() : (
