@@ -18,6 +18,9 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
   // طابعة حرارية للضغط يدوياً على «طباعة 80 مم» في كل مستند
   const [printMode, setPrintMode] = useState(gs.printer === "xprinter" ? "receipt80" : "auto"); // auto | receipt80
   const [showSettings, setShowSettings] = useState(false);
+  // عدد النسخ — يبدأ من إعداد النظام العام لكنه قابل للتعديل لهذه الطباعة
+  // بعينها فقط (فاتورة واحدة أحياناً، نسختان -للزبون وللمحل- أحياناً أخرى)
+  const [copies, setCopies] = useState(Math.max(1, parseInt(gs.printCopies) || 1));
   const docNo = cfg.docNo || ("DOC-" + Date.now().toString().slice(-6));
   const fileName = docNo + ".pdf";
   const isReceiptMode = printMode === "receipt80";
@@ -118,7 +121,7 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
     } catch { /* المستخدم أغلق قائمة المشاركة */ }
   };
 
-  const printDoc = (mode = "auto") => {
+  const printDoc = (mode = "auto", copyCount = 1) => {
     document.body.classList.add("nk-printing");
     // @page لا يمكن تقييده بصنف على body في CSS القياسية (هو قاعدة عامة على
     // مستوى المستند) — بلا هذا الحقن المؤقت، حجم الصفحة الفعلي المُرسل
@@ -131,15 +134,28 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
       pageStyleEl.textContent = "@page { size: 80mm auto; margin: 0; }";
       document.head.appendChild(pageStyleEl);
     }
-    const done = () => {
+    // متصفحات الويب لا تعرض معامل "عدد النسخ" لـwindow.print() برمجياً — الحل
+    // العملي هو استدعاء print() مرة أخرى بعد كل afterprint حتى نطبع العدد
+    // المطلوب. هذا يهم تحديداً أجهزة الكاشير التي تعمل بوضع طباعة صامتة
+    // (بلا نافذة طباعة أصلاً)، فتعتمد بصمت على آخر عدد نسخ محفوظ للطابعة —
+    // قد يكون 2 دون علم المستخدم وبلا أي مكان لتعديله من هناك
+    const total = Math.max(1, parseInt(copyCount) || 1);
+    let printed = 0;
+    const cleanup = () => {
       document.body.classList.remove("nk-printing");
       document.body.classList.remove("nk-receipt-print");
       if (pageStyleEl) { pageStyleEl.remove(); pageStyleEl = null; }
-      window.removeEventListener("afterprint", done);
+      window.removeEventListener("afterprint", onAfterPrint);
     };
-    window.addEventListener("afterprint", done);
-    setTimeout(done, 3000);
-    window.print();
+    const triggerPrint = () => { printed++; window.print(); };
+    const onAfterPrint = () => {
+      if (printed < total) setTimeout(triggerPrint, 400);
+      else cleanup();
+    };
+    window.addEventListener("afterprint", onAfterPrint);
+    // شبكة أمان: بعض أوضاع الطباعة الصامتة لا تُطلق afterprint إطلاقاً
+    setTimeout(cleanup, total * 4000 + 1500);
+    triggerPrint();
   };
 
   const btn = (bg, color) => ({ background: bg, color, border: "none", borderRadius: 9, fontSize: 13, fontWeight: 700, padding: "8px 15px", cursor: "pointer", fontFamily: "inherit", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 });
@@ -170,10 +186,15 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
                 (انظر useEffect أعلاه) — لا يكتفي بتغيير الطباعة الفورية فقط */}
             <button onClick={() => setPrintMode("auto")} style={btn(printMode === "auto" ? "rgba(255,255,255,.32)" : "rgba(255,255,255,.14)", "#fff")}>🖨 عرض عادي</button>
             <button onClick={() => setPrintMode("receipt80")} style={btn(printMode === "receipt80" ? "#ff9800" : "rgba(255,255,255,.14)", "#fff")}>🧾 عرض 80 مم</button>
-            <button onClick={() => printDoc(printMode)} style={btn(D.gold, "#fff")}>🖨 طباعة</button>
+            {/* عدد نسخ هذه الطباعة تحديداً — لا يغيّر الإعداد العام في النظام،
+                يتيح فقط رفع/خفض العدد لهذا الإصدار بعينه (فاتورة واحدة أحياناً،
+                نسختان -للزبون وللمحل- أحياناً أخرى) */}
+            <input type="number" min="1" max="5" value={copies} onChange={e => setCopies(Math.max(1, Math.min(5, parseInt(e.target.value) || 1)))}
+              title="عدد النسخ لهذه الطباعة" style={{ width: 44, textAlign: "center", borderRadius: 8, border: "1px solid rgba(255,255,255,.3)", background: "rgba(255,255,255,.14)", color: "#fff", fontSize: 13, padding: "6px 4px" }} />
+            <button onClick={() => printDoc(printMode, copies)} style={btn(D.gold, "#fff")}>🖨 طباعة</button>
           </>
         )}
-        {state !== "ready" && <button onClick={() => printDoc()} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة / حفظ</button>}
+        {state !== "ready" && <button onClick={() => printDoc("auto", copies)} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة / حفظ</button>}
         <button onClick={() => setShowSettings(!showSettings)} style={btn("rgba(255,255,255,.14)", "#fff")}>⚙️ إعدادات</button>
         <button onClick={onClose} style={btn("rgba(255,255,255,.14)", "#fff")}>✕ إغلاق</button>
       </div>

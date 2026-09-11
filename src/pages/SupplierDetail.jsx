@@ -61,7 +61,14 @@ export default function SupplierDetail({ ctx, supplier, onClose }) {
       <div class="r"><span>المتبقي:</span><span>${fmt(newDue)} ${cur}</span></div>
     </div>
     <div class="ft">${settings?.invoiceFooter || "نادي النخيل"}</div>
-    <script>window.onload=function(){window.print();}</script></body></html>`);
+    <script>
+      // نافذة الطباعة هنا مستند منفصل (window.open) فلا يصله الحل المستخدم في
+      // معاينة PDF المشتركة — نكرر نفس فكرة تسلسل afterprint هنا محلياً
+      var __copies=${Math.max(1, parseInt(settings?.printCopies) || 1)}, __printed=0;
+      function __doPrint(){ __printed++; window.print(); }
+      window.onafterprint=function(){ if(__printed<__copies){ setTimeout(__doPrint,400);} else { window.close(); } };
+      window.onload=function(){ __doPrint(); };
+    </script></body></html>`);
     w.document.close();
   };
 
