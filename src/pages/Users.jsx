@@ -5,7 +5,7 @@ import { PageTop, Btn, Card, CardHead, Badge, Modal, Field, Inp, Sel } from "../
 import { todayISO } from "../utils/format.js";
 import { genSalt, hashPassword } from "../utils/auth.js";
 
-const emptyForm = { name: "", username: "", password: "", role: "بائع", shift: "صباحي", salary: "", salaryStart: todayISO() };
+const emptyForm = { name: "", password: "", role: "بائع", shift: "صباحي", salary: "", salaryStart: todayISO() };
 
 /* ============================ USERS ============================ */
 export default function Users({ ctx }) {
@@ -52,10 +52,10 @@ export default function Users({ ctx }) {
   const openAddModal = () => { setEditing(null); setF(emptyForm); setModal(true); };
   // تعديل الاسم/اسم الدخول/الدور/الوردية بعد الإنشاء — لم تكن هناك وسيلة
   // لتصحيح خطأ إملائي أو تحديث الوردية سوى حذف الحساب وإعادة إنشائه بالكامل
-  const openEditModal = (u) => { setEditing(u); setF({ name: u.name, username: u.username, password: "", role: u.role, shift: u.shift, salary: "", salaryStart: todayISO() }); setModal(true); };
+  const openEditModal = (u) => { setEditing(u); setF({ name: u.name, password: "", role: u.role, shift: u.shift, salary: "", salaryStart: todayISO() }); setModal(true); };
 
   const addUser = async () => {
-    if (!f.name.trim() || !f.username.trim()) { showToast("أدخل الاسم واسم المستخدم"); return; }
+    if (!f.name.trim()) { showToast("أدخل الاسم"); return; }
     if (!f.password || f.password.length < 4) { showToast("أدخل رمز دخول من 4 خانات على الأقل"); return; }
     const perms = { invoices: true, discounts: false, cancel: false, reports: false, customers: true, prices: false, purchases: false, inventory: false, salaries: false };
     const newId = Math.max(0, ...users.map(x => x.id)) + 1;
@@ -68,14 +68,14 @@ export default function Users({ ctx }) {
     }
     const passwordSalt = genSalt();
     const passwordHash = await hashPassword(f.password, passwordSalt);
-    setUsers(us => [...us, { id: newId, name: f.name.trim(), username: f.username, passwordHash, passwordSalt, role: f.role, shift: f.shift, active: true, perms, pages: {}, linkedEmployeeId }]);
+    setUsers(us => [...us, { id: newId, name: f.name.trim(), passwordHash, passwordSalt, role: f.role, shift: f.shift, active: true, perms, pages: {}, linkedEmployeeId }]);
     showToast(linkedEmployeeId ? "تمت إضافة المستخدم وربطه تلقائياً بسجل موظف براتبه" : "تمت إضافة المستخدم");
     setModal(false); setF(emptyForm);
   };
 
   const saveEdit = () => {
-    if (!f.name.trim() || !f.username.trim()) { showToast("أدخل الاسم واسم المستخدم"); return; }
-    setUsers(us => us.map(u => u.id === editing.id ? { ...u, name: f.name.trim(), username: f.username.trim(), role: f.role, shift: f.shift } : u));
+    if (!f.name.trim()) { showToast("أدخل الاسم"); return; }
+    setUsers(us => us.map(u => u.id === editing.id ? { ...u, name: f.name.trim(), role: f.role, shift: f.shift } : u));
     // مزامنة سجل الموظف المرتبط (إن وجد) كي لا يختلف الاسم بين الحسابين
     if (editing.linkedEmployeeId != null) {
       setEmployees(es => es.map(e => e.id === editing.linkedEmployeeId ? { ...e, name: f.name.trim(), role: f.role } : e));
@@ -174,7 +174,6 @@ export default function Users({ ctx }) {
       {modal && <Modal title={editing ? `تعديل بيانات — ${editing.name}` : "إضافة مستخدم جديد"} onClose={() => { setModal(false); setEditing(null); }} width={460}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <Field label="الاسم الكامل" full><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} /></Field>
-          <Field label="اسم المستخدم"><Inp value={f.username} onChange={e => setF({ ...f, username: e.target.value })} placeholder="user1" /></Field>
           <Field label="الدور"><Sel value={f.role} onChange={e => setF({ ...f, role: e.target.value })}><option value="بائع">بائع</option><option value="مدير">مدير</option></Sel></Field>
           <Field label="الوردية"><Sel value={f.shift} onChange={e => setF({ ...f, shift: e.target.value })}><option>صباحي</option><option>مسائي</option><option value="—">—</option></Sel></Field>
           {!editing && <Field label="رمز الدخول * (4 خانات فأكثر)" full><Inp type="password" autoComplete="new-password" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} placeholder="••••••" /></Field>}

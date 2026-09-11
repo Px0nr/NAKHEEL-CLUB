@@ -5,7 +5,7 @@ import { genSalt, hashPassword } from "../utils/auth.js";
 
 /* ============================ FIRST SETUP (إنشاء المدير الرئيسي) ============================ */
 export default function FirstSetup({ settings = {}, onCreate }) {
-  const [f, setF] = useState({ name: "", username: "admin", password: "", confirm: "", clubName: settings.clubName || "نادي النخيل" });
+  const [f, setF] = useState({ name: "", password: "", confirm: "", clubName: settings.clubName || "نادي النخيل" });
   const [err, setErr] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -13,14 +13,13 @@ export default function FirstSetup({ settings = {}, onCreate }) {
 
   const create = async () => {
     if (!f.name.trim()) { setErr("أدخل اسمك الكامل"); return; }
-    if (!f.username.trim()) { setErr("أدخل اسم المستخدم"); return; }
     if (!f.password || f.password.length < 4) { setErr("أدخل رمز دخول من 4 خانات على الأقل"); return; }
     if (f.password !== f.confirm) { setErr("رمز الدخول وتأكيده غير متطابقين"); return; }
     setBusy(true);
     const passwordSalt = genSalt();
     const passwordHash = await hashPassword(f.password, passwordSalt);
     const admin = {
-      id: 1, name: f.name.trim(), username: f.username.trim(), passwordSalt, passwordHash, role: "مدير", shift: "—", active: true,
+      id: 1, name: f.name.trim(), passwordSalt, passwordHash, role: "مدير", shift: "—", active: true,
       perms: { invoices: true, discounts: true, cancel: true, reports: true, customers: true, prices: true, purchases: true, inventory: true, salaries: true },
       pages: {},
     };
@@ -41,12 +40,6 @@ export default function FirstSetup({ settings = {}, onCreate }) {
           <label style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>الاسم الكامل *</label>
           <input value={f.name} autoFocus onChange={e => { set("name", e.target.value); setErr(""); }} placeholder="مثال: أحمد الحسين"
             style={{ width: "100%", marginTop: 4, fontSize: 13, border: `0.5px solid ${C.bc}`, borderRadius: 10, padding: ".6rem .8rem", background: C.crm, fontFamily: "inherit", outline: "none" }} />
-        </div>
-        <div style={{ textAlign: "right", marginBottom: 12 }}>
-          <label style={{ fontSize: 11, color: C.mt, fontWeight: 600 }}>اسم المستخدم (للدخول) *</label>
-          <input value={f.username} onChange={e => { set("username", e.target.value); setErr(""); }} placeholder="admin"
-            onKeyDown={e => e.key === "Enter" && create()}
-            style={{ width: "100%", marginTop: 4, fontSize: 13, border: `0.5px solid ${C.bc}`, borderRadius: 10, padding: ".6rem .8rem", background: C.crm, fontFamily: "inherit", outline: "none", direction: "ltr", textAlign: "left" }} />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
           <div style={{ textAlign: "right" }}>

@@ -63,11 +63,11 @@ export const PERIOD_NAME = { morning: "الفترة الصباحية (6ص – 4�
 export const PERIOD_ICON = { morning: "🌅", evening: "🌙", allday: "🕐" };
 
 export const SEED_USERS = [
-  { id: 1, name: "أحمد الحسين", username: "admin", role: "مدير", shift: "—", active: true,
+  { id: 1, name: "أحمد الحسين", role: "مدير", shift: "—", active: true,
     perms: { invoices: true, discounts: true, cancel: true, reports: true, customers: true, prices: true, purchases: true, inventory: true, salaries: true } },
-  { id: 2, name: "سالم محمد", username: "salem", role: "بائع", shift: "صباحي", active: true,
+  { id: 2, name: "سالم محمد", role: "بائع", shift: "صباحي", active: true,
     perms: { invoices: true, discounts: true, cancel: false, reports: false, customers: true, prices: false, purchases: false, inventory: false, salaries: false } },
-  { id: 3, name: "فارس عمر", username: "faris", role: "بائع", shift: "مسائي", active: true,
+  { id: 3, name: "فارس عمر", role: "بائع", shift: "مسائي", active: true,
     perms: { invoices: true, discounts: false, cancel: false, reports: false, customers: true, prices: false, purchases: false, inventory: false, salaries: false } },
 ];
 
