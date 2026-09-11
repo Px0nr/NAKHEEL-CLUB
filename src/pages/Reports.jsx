@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { TYPE_NAME, TYPE_ICON, ASSET_STATUS } from "../constants/seeds.js";
+import { normalizeAsset, activeQtyOf } from "../utils/assetsHelpers.js";
 import { PageTop, Field, Sel, Inp, Btn, Table, Crest } from "../components/ui.jsx";
 import { RankBarChart, TrendChart } from "../components/charts.jsx";
 import { pctDelta, rangePreset, QUICK_RANGES } from "../utils/analytics.js";
@@ -113,15 +114,24 @@ export default function Reports({ ctx }) {
     }
 
     if (type === "assets") {
-      const active = assets.filter(a => a.status === "active").length;
-      const maint = assets.filter(a => a.status === "maintenance").length;
-      const damaged = assets.filter(a => a.status === "damaged").length;
-      const lost = assets.filter(a => a.status === "lost").length;
-      const val = assets.filter(a => a.status === "active" || a.status === "maintenance").reduce((s, a) => s + (a.cost || 0) * (a.qty || 1), 0);
-      const statusChart = [["نشط", active], ["صيانة", maint], ["تالف", damaged], ["مفقود", lost]].filter(([, v]) => v > 0);
+      const normAssets = assets.map(normalizeAsset);
+      const active = normAssets.reduce((s, a) => s + activeQtyOf(a), 0);
+      const maint = normAssets.reduce((s, a) => s + (a.maintQty || 0), 0);
+      const damaged = normAssets.reduce((s, a) => s + (a.damagedQty || 0), 0);
+      const lost = normAssets.reduce((s, a) => s + (a.lostQty || 0), 0);
+      const retired = normAssets.reduce((s, a) => s + (a.retiredQty || 0), 0);
+      const val = normAssets.reduce((s, a) => s + (a.cost || 0) * (activeQtyOf(a) + (a.maintQty || 0)), 0);
+      const statusChart = [["نشط", active], ["صيانة", maint], ["تالف", damaged], ["مفقود", lost], ["مستبعد", retired]].filter(([, v]) => v > 0);
+      const statusLabel = (a) => [
+        activeQtyOf(a) > 0 ? `${ASSET_STATUS.active.label} ×${activeQtyOf(a)}` : null,
+        a.maintQty > 0 ? `${ASSET_STATUS.maintenance.label} ×${a.maintQty}` : null,
+        a.damagedQty > 0 ? `${ASSET_STATUS.damaged.label} ×${a.damagedQty}` : null,
+        a.lostQty > 0 ? `${ASSET_STATUS.lost.label} ×${a.lostQty}` : null,
+        a.retiredQty > 0 ? `${ASSET_STATUS.retired.label} ×${a.retiredQty}` : null,
+      ].filter(Boolean).join("، ") || "—";
       return { title: "تقرير موارد النادي", summary: [["قيمة الموجودات", fmt(val) + " " + cur], ["موجود / صيانة", active + " / " + maint], ["تالف / مفقود", damaged + " / " + lost]],
         thead: ["المورد", "الفئة", "العدد", "تاريخ الإضافة", "التكلفة", "الحالة"],
-        tbody: assets.map(a => [a.name, a.cat, a.qty, arDate(a.addedAt), a.cost ? fmt(a.cost) + " " + cur : "—", ASSET_STATUS[a.status].label]),
+        tbody: normAssets.map(a => [a.name, a.cat, a.qty, arDate(a.addedAt), a.cost ? fmt(a.cost) + " " + cur : "—", statusLabel(a)]),
         chart: statusChart.length ? { data: statusChart.map(([label, value]) => ({ label, value })), color: C.gold } : null };
     }
 

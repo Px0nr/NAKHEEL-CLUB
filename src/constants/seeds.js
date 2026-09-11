@@ -107,6 +107,7 @@ export const ASSET_STATUS = {
   maintenance: { label: "في الصيانة", icon: "🔧", tone: "b", color: "#2a78d6" },
   damaged: { label: "تالف", icon: "⚠️", tone: "r", color: "#c0392b" },
   lost: { label: "مفقود", icon: "❓", tone: "a", color: "#8a6a20" },
+  retired: { label: "مستبعد", icon: "📤", tone: "p", color: "#6a4d8a" },
 };
 
 // كل الصفحات القابلة للإظهار/الإخفاء لكل مستخدم (ما عدا صفحات الإدارة المقصورة على المدير)

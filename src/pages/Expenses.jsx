@@ -72,7 +72,7 @@ export default function Expenses({ ctx }) {
     showToast("تم حذف المصروف");
   };
   const byCat = (c) => expenses.filter(e => e.cat === c).reduce((s, e) => s + e.amount, 0);
-  const CAT_TONE = { "أجار": "b", "مرتبات": "gold", "كهرباء": "r", "صيانة": "g", "سلفة موظف": "p", "أخرى": "a" };
+  const CAT_TONE = { "أجار": "b", "مرتبات": "gold", "كهرباء": "r", "صيانة": "g", "سلفة موظف": "p", "شراء موارد": "gold", "أخرى": "a" };
   const byEmp = empFilter === "all" ? expenses : empFilter === "none" ? expenses.filter(e => !e.empId) : expenses.filter(e => e.empId == empFilter);
   const shown = byEmp.filter(e =>
     (!q || e.desc.includes(q) || e.cat.includes(q) || (e.empName || "").includes(q) || (e.supplierName || "").includes(q)) &&
@@ -168,7 +168,7 @@ export default function Expenses({ ctx }) {
       {modal && <Modal title={editing ? `تعديل مصروف — ${editing.desc}` : "إضافة مصروف"} onClose={() => { setModal(false); setEditing(null); }} width={470}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <Field label="التاريخ"><Inp type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} /></Field>
-          <Field label="الفئة"><Sel value={f.cat} onChange={e => setF({ ...f, cat: e.target.value, empId: "" })}>{["أجار", "مرتبات", "كهرباء", "صيانة", "سلفة موظف", "أخرى"].map(c => <option key={c}>{c}</option>)}</Sel></Field>
+          <Field label="الفئة"><Sel value={f.cat} onChange={e => setF({ ...f, cat: e.target.value, empId: "" })}>{["أجار", "مرتبات", "كهرباء", "صيانة", "سلفة موظف", "شراء موارد", "أخرى"].map(c => <option key={c}>{c}</option>)}</Sel></Field>
           {f.cat === "سلفة موظف" && (
             <Field label="الموظف (تُخصم من مرتبه)" full>
               <Sel value={f.empId} onChange={e => setF({ ...f, empId: e.target.value })}>

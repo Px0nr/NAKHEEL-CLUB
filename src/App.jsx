@@ -7,6 +7,7 @@ import {
   SEED_TABLES, SEED_ASSETS,
 } from "./constants/seeds.js";
 import { todayISO, daysBetween, overdueDays } from "./utils/format.js";
+import { normalizeAsset, lastMaintenanceStart } from "./utils/assetsHelpers.js";
 import { nextCounter } from "./utils/counters.js";
 import { setAppAnimations } from "./utils/motionPrefs.js";
 import { DB, usePersistentState } from "./db/db.js";
@@ -310,7 +311,7 @@ function NakheelApp() {
     if (bkDays === null || bkDays >= (settings.backupFreq || 7)) list.push({ id: "backup", icon: "🛡", tone: "gold", text: lastBk ? `مضى ${bkDays} يوم على آخر نسخة محفوظة كملف` : "لا توجد نسخة محفوظة كملف خارج المتصفح", page: "settings" });
     const todayClosing = closings.find(c => c.date === todayISO());
     if (!todayClosing) list.push({ id: "closing", icon: "🔒", tone: "b", text: "لم يُغلق حساب اليوم في الخزينة بعد", page: "treasury" });
-    const maintTooLong = assets.filter(a => a.status === "maintenance" && a.maintStart && daysBetween(a.maintStart, todayISO()) > 14);
+    const maintTooLong = assets.map(normalizeAsset).filter(a => a.maintQty > 0 && lastMaintenanceStart(a) && daysBetween(lastMaintenanceStart(a), todayISO()) > 14);
     if (maintTooLong.length > 0) list.push({ id: "maint", icon: "🔧", tone: "a", text: `${maintTooLong.length} مورد في الصيانة منذ أكثر من 14 يوماً`, page: "assets" });
     const rentalsEndingSoon = (rentals || []).filter(r => r.status !== "مُرجَع" && (new Date(r.endAt).getTime() - Date.now()) <= 3600000);
     if (rentalsEndingSoon.length > 0) list.push({ id: "rental", icon: "⏰", tone: "a", text: `${rentalsEndingSoon.length} جهاز مؤجَّر تنتهي مدته خلال ساعة أو متأخر`, page: "rentals" });
