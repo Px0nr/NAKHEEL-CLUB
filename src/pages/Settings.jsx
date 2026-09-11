@@ -262,6 +262,33 @@ export default function Settings({ ctx }) {
             <span style={{ fontSize: 16 }}>💡</span>
             <span>عند إتمام أي بيع، سيتم تنسيق الفاتورة تلقائياً حسب الطابعة المختارة — الإيصال الحراري يظهر مضغوطاً بعرض 80mm، وطابعة A4 تعرض فاتورة رسمية كاملة.</span>
           </div>
+          {/* طباعة صفحة اختبار — لضبط محاذاة الطابعة الحرارية قبل استخدامها في
+              بيع حقيقي، بدل الاضطرار لتجربة أول فاتورة فعلية كاختبار */}
+          {settings.printer === "xprinter" && (
+            <div style={{ marginTop: 12, borderTop: `0.5px solid ${C.bc}`, paddingTop: 12 }}>
+              <Btn onClick={() => {
+                const w = window.open("", "_blank", "width=340,height=500");
+                // window.open يُعيد null لو حظر المتصفح النافذة المنبثقة — كان
+                // الكود يفترض دائماً نجاحها فيتعطّل النظام بخطأ غير مفهوم بدل
+                // رسالة واضحة تطلب السماح بالنوافذ المنبثقة
+                if (!w) { showToast("⚠ يبدو أن المتصفح حظر النافذة المنبثقة — اسمح بالنوافذ المنبثقة لهذا الموقع وحاول مجدداً"); return; }
+                w.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>صفحة اختبار</title>
+                <style>@page{size:80mm auto;margin:0}
+                *{box-sizing:border-box;margin:0;padding:0;font-family:monospace}
+                body{padding:10px;direction:rtl;color:#1a1a18;width:80mm}
+                .ttl{text-align:center;font-size:14px;font-weight:700;color:#1a5c2e}
+                .r{display:flex;justify-content:space-between;font-size:11px;margin:6px 0;border-bottom:1px dashed #ccc;padding-bottom:6px}
+                .rule{border:1px dashed #c9a84c;text-align:center;font-size:10px;padding:4px;margin-top:8px}</style></head><body>
+                <div class="ttl">🧪 صفحة اختبار — ${settings.clubName || "نادي النخيل"}</div>
+                <div class="r"><span>العرض الكامل للورق:</span><span>80مم</span></div>
+                <div class="r"><span>حجم الخط الحالي:</span><span>${settings.receipt80FontSize || 9}px</span></div>
+                <div class="rule">إن ظهر هذا الإطار كاملاً بلا قصّ من الجوانب، فالطابعة مضبوطة بشكل صحيح ✓</div>
+                <script>window.onload=function(){window.print();}</script></body></html>`);
+                w.document.close();
+              }}>🧪 طباعة صفحة اختبار</Btn>
+              <div style={{ fontSize: 10.5, color: C.mt, marginTop: 6 }}>يطبع إطاراً بعرض الورق الكامل — إن قُصّت حوافه فراجع إعدادات حجم الورق في تعريف الطابعة.</div>
+            </div>
+          )}
         </Card>
       )}
 

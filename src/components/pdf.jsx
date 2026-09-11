@@ -13,7 +13,10 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
   const [blob, setBlob] = useState(null);
   const [blobUrl, setBlobUrl] = useState(null);
   const [note, setNote] = useState("");
-  const [printMode, setPrintMode] = useState("auto"); // auto | receipt80
+  // يبدأ تلقائياً بوضع الإيصال إن كانت الطابعة الحرارية مُختارة في الإعدادات —
+  // كان يبدأ دائماً بالوضع العادي بغض النظر عن اختيار الطابعة، فيضطر من يملك
+  // طابعة حرارية للضغط يدوياً على «طباعة 80 مم» في كل مستند
+  const [printMode, setPrintMode] = useState(gs.printer === "xprinter" ? "receipt80" : "auto"); // auto | receipt80
   const [showSettings, setShowSettings] = useState(false);
   const docNo = cfg.docNo || ("DOC-" + Date.now().toString().slice(-6));
   const fileName = docNo + ".pdf";
@@ -62,18 +65,33 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
     }
   }, [docNo, isReceiptMode, printSettings.showBarcode]);
 
-  // تجهيز ملف الـPDF تلقائياً عند فتح المعاينة
+  // تجهيز ملف الـPDF تلقائياً عند فتح المعاينة — يُعاد التجهيز أيضاً عند تبديل
+  // الوضع بين عادي/80مم، إذ لكل وضع تخطيط وحجم صفحة مختلفَين تماماً
   useEffect(() => {
     let cancelled = false;
+    setState("preparing");
     const prepare = async () => {
       // ننتظر لحظة حتى يكتمل عرض المستند والخط
       await new Promise(r => setTimeout(r, 350));
       try {
+        // وضع الإيصال 80مم كان يُصدَّر دائماً بصيغة A4 بغض النظر عن اختيار
+        // المستخدم — الملف المُنزَّل أو المُشارَك عبر واتساب يكون صفحة A4
+        // كاملة بمحتوى ضيق داخلها، لا إيصالاً حقيقياً بحجم 80مم. الحجم هنا
+        // يُحسب من الارتفاع الفعلي للمحتوى المعروض (ورق حراري لفّة مستمرة
+        // بلا طول صفحة ثابت، فلا معنى لاستخدام A4 أو حتى طول 80مم ثابت).
+        let jsPdfOpts = { unit: "mm", format: "a4", orientation: "portrait" };
+        let margin = [8, 8, 10, 8];
+        if (isReceiptMode && sheetRef.current) {
+          const pxToMm = 0.264583;
+          const heightMm = Math.max(60, sheetRef.current.scrollHeight * pxToMm + 16);
+          jsPdfOpts = { unit: "mm", format: [80, heightMm], orientation: "portrait" };
+          margin = [3, 3, 5, 3];
+        }
         const b = await html2pdf().set({
-          margin: [8, 8, 10, 8],
+          margin,
           image: { type: "jpeg", quality: 0.96 },
           html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          jsPDF: jsPdfOpts,
         }).from(sheetRef.current).output("blob");
         if (cancelled) return;
         const url = URL.createObjectURL(b);
@@ -84,7 +102,7 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
     };
     prepare();
     return () => { cancelled = true; };
-  }, []);
+  }, [isReceiptMode]);
   useEffect(() => () => { if (blobUrl) URL.revokeObjectURL(blobUrl); }, [blobUrl]);
 
   // مشاركة أصلية (الأجهزة اللوحية/الهواتف): تفتح قائمة النظام ← واتساب والملف مرفق
@@ -102,10 +120,21 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
 
   const printDoc = (mode = "auto") => {
     document.body.classList.add("nk-printing");
-    if (mode === "receipt80") document.body.classList.add("nk-receipt-print");
+    // @page لا يمكن تقييده بصنف على body في CSS القياسية (هو قاعدة عامة على
+    // مستوى المستند) — بلا هذا الحقن المؤقت، حجم الصفحة الفعلي المُرسل
+    // للطابعة يبقى افتراضي المتصفح (A4/Letter غالباً) حتى مع تضييق المحتوى
+    // بصرياً إلى 80مم، فتُنتج الطابعات الحرارية تغذية ورق زائدة بعد كل إيصال
+    let pageStyleEl = null;
+    if (mode === "receipt80") {
+      document.body.classList.add("nk-receipt-print");
+      pageStyleEl = document.createElement("style");
+      pageStyleEl.textContent = "@page { size: 80mm auto; margin: 0; }";
+      document.head.appendChild(pageStyleEl);
+    }
     const done = () => {
       document.body.classList.remove("nk-printing");
       document.body.classList.remove("nk-receipt-print");
+      if (pageStyleEl) { pageStyleEl.remove(); pageStyleEl = null; }
       window.removeEventListener("afterprint", done);
     };
     window.addEventListener("afterprint", done);
@@ -137,8 +166,11 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
         {state === "preparing" && <span style={{ ...btn("rgba(255,255,255,.14)", "#fff"), cursor: "default" }}>⏳ تجهيز الملف...</span>}
         {state === "ready" && (
           <>
-            <button onClick={() => printDoc("auto")} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة عادية</button>
-            <button onClick={() => printDoc("receipt80")} style={btn("#ff9800", "#fff")}>🧾 طباعة 80 مم</button>
+            {/* التبديل هنا يُعيد أيضاً تجهيز الملف بحجم الصفحة الصحيح لهذا الوضع
+                (انظر useEffect أعلاه) — لا يكتفي بتغيير الطباعة الفورية فقط */}
+            <button onClick={() => setPrintMode("auto")} style={btn(printMode === "auto" ? "rgba(255,255,255,.32)" : "rgba(255,255,255,.14)", "#fff")}>🖨 عرض عادي</button>
+            <button onClick={() => setPrintMode("receipt80")} style={btn(printMode === "receipt80" ? "#ff9800" : "rgba(255,255,255,.14)", "#fff")}>🧾 عرض 80 مم</button>
+            <button onClick={() => printDoc(printMode)} style={btn(D.gold, "#fff")}>🖨 طباعة</button>
           </>
         )}
         {state !== "ready" && <button onClick={() => printDoc()} style={btn("rgba(255,255,255,.14)", "#fff")}>🖨 طباعة / حفظ</button>}
@@ -262,7 +294,7 @@ export function PdfPreview({ doc, onClose, globalSettings }) {
             <div style={{ display: "flex", alignItems: "center", gap: isReceiptMode ? 6 : 11, flexDirection: isReceiptMode ? "column" : "row" }}>
               {s.logo ? <img src={s.logo} alt="" style={{ width: isReceiptMode ? 32 : 54, height: isReceiptMode ? 32 : 54, borderRadius: 12, objectFit: "cover" }} /> : <Crest size={isReceiptMode ? 32 : 54} />}
               <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: isReceiptMode ? 13 : 18, fontWeight: 900, color: D.grn }}>{s.clubName || "نادي النخيل"}</div>
+                <div style={{ fontSize: isReceiptMode ? 13 : 18, fontWeight: 900, color: D.grn, ...(isReceiptMode ? { maxWidth: 190, overflowWrap: "anywhere", wordBreak: "break-word", lineHeight: 1.3 } : {}) }}>{s.clubName || "نادي النخيل"}</div>
                 {!isReceiptMode && <div style={{ fontSize: 10.5, color: D.mt, marginTop: 2 }}>{s.clubSub || "النادي الرياضي الترفيهي"}</div>}
               </div>
             </div>

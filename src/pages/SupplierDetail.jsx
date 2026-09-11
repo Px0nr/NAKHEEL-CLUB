@@ -39,9 +39,13 @@ export default function SupplierDetail({ ctx, supplier, onClose }) {
     const isThermal = settings?.printer === "xprinter";
     const newDue = Math.max(0, (s.due || 0) - amt);
     const w = window.open("", "_blank", `width=${isThermal ? 340 : 800},height=600`);
+    // window.open يُعيد null لو حظر المتصفح النافذة — بلا هذا الفحص يتعطّل
+    // النظام بخطأ غير مفهوم بدل رسالة واضحة
+    if (!w) { showToast("⚠ يبدو أن المتصفح حظر النافذة المنبثقة — اسمح بالنوافذ المنبثقة لهذا الموقع وحاول مجدداً"); return; }
     w.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>سند صرف</title>
-    <style>*{box-sizing:border-box;margin:0;padding:0;font-family:${isThermal ? "monospace" : "'Tajawal',sans-serif"}}
-    body{padding:${isThermal ? "10px" : "2cm"};direction:rtl;color:#1a1a18}
+    <style>${isThermal ? "@page{size:80mm auto;margin:0}" : ""}
+    *{box-sizing:border-box;margin:0;padding:0;font-family:${isThermal ? "monospace" : "'Tajawal',sans-serif"}}
+    body{padding:${isThermal ? "10px" : "2cm"};direction:rtl;color:#1a1a18;${isThermal ? "width:80mm;" : ""}}
     .ttl{text-align:center;font-size:${isThermal ? "14px" : "18px"};font-weight:700;color:#1a5c2e}.sub{text-align:center;font-size:10px;color:#7a7870;margin-bottom:8px}
     .box{border:1px dashed #c9a84c;border-radius:8px;padding:${isThermal ? "8px" : "16px"};margin-top:10px}
     .r{display:flex;justify-content:space-between;font-size:${isThermal ? "11px" : "13px"};margin-bottom:6px}
