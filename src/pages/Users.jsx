@@ -5,31 +5,55 @@ import { PageTop, Btn, Card, CardHead, Badge, Modal, Field, Inp, Sel } from "../
 import { todayISO } from "../utils/format.js";
 import { genSalt, hashPassword } from "../utils/auth.js";
 
+const emptyForm = { name: "", username: "", password: "", role: "بائع", shift: "صباحي", salary: "", salaryStart: todayISO() };
+
 /* ============================ USERS ============================ */
 export default function Users({ ctx }) {
-  const { users, setUsers, employees, setEmployees, showToast } = ctx;
+  const { users, setUsers, employees, setEmployees, setAuditLog, user, showToast, confirm } = ctx;
   const [sel, setSel] = useState(users.find(u => u.role === "بائع")?.id || users[0]?.id || null);
   const [modal, setModal] = useState(false);
-  const [f, setF] = useState({ name: "", username: "", password: "", role: "بائع", shift: "صباحي", salary: "", salaryStart: todayISO() });
+  const [editing, setEditing] = useState(null); // مستخدم قيد تعديل بياناته الأساسية — null يعني إضافة جديد
+  const [f, setF] = useState(emptyForm);
   const [newPwd, setNewPwd] = useState("");
   const current = users.find(u => u.id === sel) || users[0];
   if (!current) return <><PageTop title="المستخدمون والصلاحيات" /><Card><div style={{ textAlign: "center", padding: "2rem", color: C.mt }}>لا مستخدمون بعد.</div></Card></>;
-  const togglePerm = (k) => setUsers(us => us.map(u => u.id === sel ? { ...u, perms: { ...u.perms, [k]: !u.perms[k] } } : u));
-  const toggleActive = () => setUsers(us => us.map(u => u.id === sel ? { ...u, active: !u.active } : u));
+  const logAudit = (type, detail) => setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: user?.name || "—", type, detail }, ...al]);
+  // كان تبديل صلاحية أو إظهار قائمة أو إيقاف حساب — كلها تغييرات حسّاسة على من
+  // يرى/يفعل ماذا في النظام — يمرّ بلا أي أثر في سجل التدقيق، خلافاً حتى لتعديل
+  // سعر منتج الذي يُسجَّل هناك فعلاً
+  const togglePerm = (k) => {
+    setUsers(us => us.map(u => u.id === sel ? { ...u, perms: { ...u.perms, [k]: !u.perms[k] } } : u));
+    logAudit("تعديل صلاحيات", `${current.name}: ${PERM_LABELS[k]} ← ${current.perms[k] ? "معطّلة" : "مفعّلة"}`);
+  };
+  const toggleActive = async () => {
+    if (current.active && !(await confirm(`إيقاف حساب ${current.name}؟ لن يستطيع تسجيل الدخول للنظام حتى تُعيد تفعيله.`, { danger: true }))) return;
+    setUsers(us => us.map(u => u.id === sel ? { ...u, active: !u.active } : u));
+    logAudit(current.active ? "إيقاف حساب" : "تفعيل حساب", current.name);
+    showToast(current.active ? `أُوقف حساب ${current.name}` : `أُعيد تفعيل حساب ${current.name}`);
+  };
   // page visibility: page مرئية إلا إذا كانت pages[id] === false
   const pageVisible = (id) => !(current.pages && current.pages[id] === false);
-  const togglePage = (id) => setUsers(us => us.map(u => {
-    if (u.id !== sel) return u;
-    const pages = { ...(u.pages || {}) };
-    pages[id] = pages[id] === false ? true : false; // بدّل بين مرئي/مخفي
-    return { ...u, pages };
-  }));
+  const togglePage = (id) => {
+    setUsers(us => us.map(u => {
+      if (u.id !== sel) return u;
+      const pages = { ...(u.pages || {}) };
+      pages[id] = pages[id] === false ? true : false; // بدّل بين مرئي/مخفي
+      return { ...u, pages };
+    }));
+    const label = PAGE_LIST.find(p => p.id === id)?.label || id;
+    logAudit("تعديل القوائم الظاهرة", `${current.name}: ${label} ← ${pageVisible(id) ? "مخفية" : "ظاهرة"}`);
+  };
   const setAllPages = (visible) => setUsers(us => us.map(u => {
     if (u.id !== sel) return u;
     const pages = {};
     PAGE_LIST.forEach(p => { if (!visible) pages[p.id] = false; }); // إخفاء الكل = وضع false للجميع
     return { ...u, pages };
   }));
+  const openAddModal = () => { setEditing(null); setF(emptyForm); setModal(true); };
+  // تعديل الاسم/اسم الدخول/الدور/الوردية بعد الإنشاء — لم تكن هناك وسيلة
+  // لتصحيح خطأ إملائي أو تحديث الوردية سوى حذف الحساب وإعادة إنشائه بالكامل
+  const openEditModal = (u) => { setEditing(u); setF({ name: u.name, username: u.username, password: "", role: u.role, shift: u.shift, salary: "", salaryStart: todayISO() }); setModal(true); };
+
   const addUser = async () => {
     if (!f.name.trim() || !f.username.trim()) { showToast("أدخل الاسم واسم المستخدم"); return; }
     if (!f.password || f.password.length < 4) { showToast("أدخل رمز دخول من 4 خانات على الأقل"); return; }
@@ -46,13 +70,26 @@ export default function Users({ ctx }) {
     const passwordHash = await hashPassword(f.password, passwordSalt);
     setUsers(us => [...us, { id: newId, name: f.name.trim(), username: f.username, passwordHash, passwordSalt, role: f.role, shift: f.shift, active: true, perms, pages: {}, linkedEmployeeId }]);
     showToast(linkedEmployeeId ? "تمت إضافة المستخدم وربطه تلقائياً بسجل موظف براتبه" : "تمت إضافة المستخدم");
-    setModal(false); setF({ name: "", username: "", password: "", role: "بائع", shift: "صباحي", salary: "", salaryStart: todayISO() });
+    setModal(false); setF(emptyForm);
   };
+
+  const saveEdit = () => {
+    if (!f.name.trim() || !f.username.trim()) { showToast("أدخل الاسم واسم المستخدم"); return; }
+    setUsers(us => us.map(u => u.id === editing.id ? { ...u, name: f.name.trim(), username: f.username.trim(), role: f.role, shift: f.shift } : u));
+    // مزامنة سجل الموظف المرتبط (إن وجد) كي لا يختلف الاسم بين الحسابين
+    if (editing.linkedEmployeeId != null) {
+      setEmployees(es => es.map(e => e.id === editing.linkedEmployeeId ? { ...e, name: f.name.trim(), role: f.role } : e));
+    }
+    logAudit("تعديل بيانات مستخدم", `${editing.name} ← ${f.name.trim()} (${f.role})`);
+    showToast("تم تحديث بيانات المستخدم");
+    setModal(false); setEditing(null); setF(emptyForm);
+  };
+  const save = () => editing ? saveEdit() : addUser();
   const visibleCount = PAGE_LIST.filter(p => pageVisible(p.id)).length;
 
   return (
     <>
-      <PageTop title="المستخدمون والصلاحيات" action={<Btn gold onClick={() => setModal(true)}>+ إضافة مستخدم</Btn>} />
+      <PageTop title="المستخدمون والصلاحيات" action={<Btn gold onClick={openAddModal}>+ إضافة مستخدم</Btn>} />
       <div style={{ display: "grid", gridTemplateColumns: ctx.scr?.isTab ? "1fr" : "1fr 1.8fr", gap: 11 }}>
         <Card>
           <CardHead title="المستخدمون" />
@@ -68,7 +105,7 @@ export default function Users({ ctx }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
           {/* الصلاحيات التفصيلية */}
           <Card>
-            <CardHead title={`صلاحيات — ${current.name}`} sub={current.role === "مدير" ? "المدير يملك كل الصلاحيات تلقائياً" : "فعّل أو عطّل كل صلاحية"} />
+            <CardHead title={`صلاحيات — ${current.name}`} sub={current.role === "مدير" ? "المدير يملك كل الصلاحيات تلقائياً" : "فعّل أو عطّل كل صلاحية"} right={<Btn sm onClick={() => openEditModal(current)}>✎ تعديل البيانات</Btn>} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 7 }}>
               {Object.keys(PERM_LABELS).map(k => (
                 <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: C.crm, borderRadius: 7, padding: ".42rem .6rem", fontSize: 12, opacity: current.role === "مدير" ? .6 : 1 }}>
@@ -128,22 +165,21 @@ export default function Users({ ctx }) {
             )}
             {current.role !== "مدير" && (
               <div style={{ display: "flex", gap: 7, marginTop: ".85rem" }}>
-                <Btn gold sm onClick={() => showToast("تم حفظ إعدادات المستخدم")}>حفظ</Btn>
                 <Btn sm danger onClick={toggleActive}>{current.active ? "إيقاف الحساب" : "تفعيل الحساب"}</Btn>
               </div>
             )}
           </Card>
         </div>
       </div>
-      {modal && <Modal title="إضافة مستخدم جديد" onClose={() => setModal(false)} width={460}>
+      {modal && <Modal title={editing ? `تعديل بيانات — ${editing.name}` : "إضافة مستخدم جديد"} onClose={() => { setModal(false); setEditing(null); }} width={460}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <Field label="الاسم الكامل" full><Inp value={f.name} onChange={e => setF({ ...f, name: e.target.value })} /></Field>
           <Field label="اسم المستخدم"><Inp value={f.username} onChange={e => setF({ ...f, username: e.target.value })} placeholder="user1" /></Field>
           <Field label="الدور"><Sel value={f.role} onChange={e => setF({ ...f, role: e.target.value })}><option value="بائع">بائع</option><option value="مدير">مدير</option></Sel></Field>
           <Field label="الوردية"><Sel value={f.shift} onChange={e => setF({ ...f, shift: e.target.value })}><option>صباحي</option><option>مسائي</option><option value="—">—</option></Sel></Field>
-          <Field label="رمز الدخول * (4 خانات فأكثر)" full><Inp type="password" autoComplete="new-password" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} placeholder="••••••" /></Field>
+          {!editing && <Field label="رمز الدخول * (4 خانات فأكثر)" full><Inp type="password" autoComplete="new-password" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} placeholder="••••••" /></Field>}
         </div>
-        {f.role !== "مدير" && (
+        {!editing && f.role !== "مدير" && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <Field label={"الراتب الشهري (" + (ctx.settings?.currency || "د.ل") + ") — اختياري"}><Inp type="number" min="0" value={f.salary} onChange={e => setF({ ...f, salary: e.target.value })} placeholder="0" /></Field>
@@ -152,8 +188,9 @@ export default function Users({ ctx }) {
             <div style={{ fontSize: 10.5, color: C.gdd, background: C.gold + "12", borderRadius: 8, padding: ".55rem .75rem", marginBottom: 10, lineHeight: 1.7 }}>💡 إن أدخلت راتباً، سيُنشأ تلقائياً سجل موظف مرتبط بنفس هذا الحساب في صفحة «المرتبات» — لا حاجة لإدخاله مرتين.</div>
           </>
         )}
-        <div style={{ fontSize: 11, color: C.mt, marginBottom: 10 }}>سيُمنح المستخدم صلاحيات افتراضية وكل القوائم ظاهرة — عدّلها بعد الإضافة. يسجّل الدخول برمزه الخاص.</div>
-        <div style={{ display: "flex", gap: 8 }}><Btn gold onClick={addUser} style={{ flex: 1, justifyContent: "center" }}>✓ إضافة</Btn><Btn onClick={() => setModal(false)}>إلغاء</Btn></div>
+        {!editing && <div style={{ fontSize: 11, color: C.mt, marginBottom: 10 }}>سيُمنح المستخدم صلاحيات افتراضية وكل القوائم ظاهرة — عدّلها بعد الإضافة. يسجّل الدخول برمزه الخاص.</div>}
+        {editing?.linkedEmployeeId != null && <div style={{ fontSize: 10.5, color: C.gdd, background: C.gold + "12", borderRadius: 8, padding: ".55rem .75rem", marginBottom: 10, lineHeight: 1.7 }}>💡 الاسم والدور سيُحدَّثان أيضاً في سجل الموظف المرتبط بهذا الحساب.</div>}
+        <div style={{ display: "flex", gap: 8 }}><Btn gold onClick={save} style={{ flex: 1, justifyContent: "center" }}>✓ {editing ? "حفظ التعديلات" : "إضافة"}</Btn><Btn onClick={() => { setModal(false); setEditing(null); }}>إلغاء</Btn></div>
       </Modal>}
     </>
   );
