@@ -363,16 +363,26 @@ function NakheelApp() {
   }, []);
 
   // انتهاء الجلسة تلقائياً بعد فترة خمول (يُضبط من الإعدادات ← الأمان)
+  // كان يسجّل الخروج فوراً بلا أي تحذير مسبق — قد يفقد المستخدم عملاً غير
+  // محفوظ في نافذة مفتوحة بلا أي فرصة لمنع ذلك؛ الآن يُنبَّه قبل 30 ثانية
   useEffect(() => {
     const mins = settings.sessionTimeout;
     if (!user || !mins) return;
-    let timer;
+    let timer, warnTimer;
+    const WARNING_MS = 30000;
+    const totalMs = mins * 60000;
     const doLogout = () => { setUser(null); setPage("dashboard"); };
-    const reset = () => { clearTimeout(timer); timer = setTimeout(doLogout, mins * 60000); };
+    const reset = () => {
+      clearTimeout(timer); clearTimeout(warnTimer);
+      if (totalMs > WARNING_MS) {
+        warnTimer = setTimeout(() => showToast("⏳ ستُسجَّل خروجك تلقائياً خلال 30 ثانية بسبب الخمول — أي حركة تُلغي ذلك", { duration: WARNING_MS }), totalMs - WARNING_MS);
+      }
+      timer = setTimeout(doLogout, totalMs);
+    };
     const events = ["mousedown", "keydown", "touchstart", "scroll"];
     events.forEach(e => window.addEventListener(e, reset));
     reset();
-    return () => { clearTimeout(timer); events.forEach(e => window.removeEventListener(e, reset)); };
+    return () => { clearTimeout(timer); clearTimeout(warnTimer); events.forEach(e => window.removeEventListener(e, reset)); };
   }, [user, settings.sessionTimeout]);
 
   // تطبيق الثيم النشط على اللوحة المشتركة قبل أي رندر — يسبق العودات المبكّرة

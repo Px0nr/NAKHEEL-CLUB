@@ -7,13 +7,58 @@ import { todayISO } from "../utils/format.js";
 import { playTimeUpAlarm } from "../utils/sound.js";
 import { DB } from "../db/db.js";
 
+// كلمات مفتاحية لكل تبويب — تُستخدم في البحث السريع أعلى الصفحة كي لا يضطر
+// المستخدم لتصفّح 9 تبويبات بحثاً عن إعداد واحد
+const TAB_KEYWORDS = {
+  appearance: ["شعار", "لوجو", "ليلي", "داكن", "ثيم", "ألوان", "خلفية", "حركة", "تنبيه صوتي"],
+  pos: ["نقطة البيع", "عرض", "شبكة", "قائمة", "مضغوط", "مجاني", "موظف"],
+  printers: ["طابعة", "xprinter", "a4", "حراري"],
+  printing: ["خط", "حشو", "padding", "باركود", "تذييل", "طباعة"],
+  invoice: ["فاتورة", "تصميم", "شكل"],
+  content: ["اسم النادي", "عنوان", "هاتف", "ترحيب", "عملة", "currency"],
+  security: ["جلسة", "خمول", "أمان", "خروج تلقائي"],
+  loyalty: ["ولاء", "نقاط", "خصم"],
+  database: ["نسخة احتياطية", "backup", "سحابة", "supabase", "مسح البيانات", "تصدير", "استيراد"],
+};
+
 export default function Settings({ ctx }) {
   const { settings, setSettings, showToast, confirm } = ctx;
   const [tab, setTab] = useState("appearance");
+  const [q, setQ] = useState("");
   const set = (k, v) => setSettings(s => ({ ...s, [k]: v }));
   const fileRef = useRef(null);
+  const importRef = useRef(null);
   // يُقاس عند فتح تبويب قاعدة البيانات فقط — المرور على كل مفاتيح التخزين ليس مجانياً
   const storage = useMemo(() => (tab === "database" ? DB.usage() : null), [tab]);
+  const [wipeText, setWipeText] = useState("");
+
+  // تصدير/استيراد الإعدادات وحدها — بدل الاضطرار لإعادة ضبط كل حقل يدوياً
+  // عند نقل التهيئة لفرع أو جهاز آخر (النسخ الاحتياطي في BackupManager يشمل
+  // كل بيانات النظام، لا الإعدادات فقط)
+  const exportSettings = () => {
+    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `نادي-النخيل-إعدادات-${todayISO()}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("تم تنزيل ملف الإعدادات");
+  };
+  const importSettings = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const imported = JSON.parse(reader.result);
+        if (!imported || typeof imported !== "object") throw new Error("bad");
+        setSettings(s => ({ ...s, ...imported }));
+        showToast("تم استيراد الإعدادات بنجاح");
+      } catch { showToast("ملف الإعدادات غير صالح"); }
+    };
+    reader.readAsText(file);
+  };
 
   const onLogo = (e) => {
     const file = e.target.files?.[0];
@@ -35,18 +80,29 @@ export default function Settings({ ctx }) {
     { id: "loyalty", label: "الولاء والنقاط", icon: "🎁" },
     { id: "database", label: "قاعدة البيانات", icon: "🗄" },
   ];
+  // بحث سريع عبر التبويبات — كانت عشرات الخيارات موزَّعة على 9 تبويبات بلا أي
+  // طريقة للقفز مباشرة لإعداد معيّن بالاسم
+  const matchesQuery = (t) => !q || t.label.includes(q) || (TAB_KEYWORDS[t.id] || []).some(k => k.includes(q));
+  const tabsShown = TABS.filter(matchesQuery);
 
   return (
     <>
-      <PageTop title="الإعدادات" action={<Btn gold onClick={() => { ctx.setAuditLog(al => [{ id: "AU-" + Date.now(), date: todayISO(), by: ctx.user?.name || "—", type: "تعديل إعدادات", detail: "تحديث إعدادات النظام" }, ...al]); showToast("تم حفظ جميع الإعدادات"); }}>✓ حفظ الكل</Btn>} />
+      <PageTop title="الإعدادات" action={
+        <input value={q} onChange={e => {
+          setQ(e.target.value);
+          const matches = TABS.filter(t => e.target.value && (t.label.includes(e.target.value) || (TAB_KEYWORDS[t.id] || []).some(k => k.includes(e.target.value))));
+          if (e.target.value && matches.length && !matches.some(m => m.id === tab)) setTab(matches[0].id);
+        }} placeholder="🔍 ابحث في الإعدادات..." style={{ ...inputStyle, width: 220 }} />
+      } />
 
       {/* tab bar */}
       <div style={{ display: "flex", gap: 4, background: C.gold + "18", borderRadius: 12, padding: 4, marginBottom: "1.1rem", flexWrap: "wrap" }}>
-        {TABS.map(t => (
+        {(q ? tabsShown : TABS).map(t => (
           <div key={t.id} onClick={() => setTab(t.id)} style={{ padding: ".45rem 1rem", borderRadius: 9, fontSize: 12.5, cursor: "pointer", fontWeight: tab === t.id ? 700 : 500, background: tab === t.id ? C.grn : "transparent", color: tab === t.id ? C.gld : C.mt, transition: "all .2s", display: "flex", alignItems: "center", gap: 6 }}>
             <span>{t.icon}</span>{t.label}
           </div>
         ))}
+        {q && tabsShown.length === 0 && <div style={{ fontSize: 12, color: C.mt, padding: ".4rem .7rem" }}>لا نتائج مطابقة</div>}
       </div>
 
       {/* ===== APPEARANCE ===== */}
@@ -261,6 +317,22 @@ export default function Settings({ ctx }) {
                 <span>إظهار التذييل</span>
               </label>
             </Field>
+
+            {/* معاينة حية — كانت هذه المتحكمات كلها بلا أي شكل مرئي لأثرها، فيجب
+                عمل بيع تجريبي وطباعته فعلياً لرؤية النتيجة */}
+            <div style={{ marginTop: 12, borderTop: `0.5px solid ${C.bc}`, paddingTop: 12 }}>
+              <div style={{ fontSize: 10.5, color: C.mt, marginBottom: 6, fontWeight: 600 }}>معاينة حية</div>
+              <div style={{ background: "#fff", border: `1px solid ${C.bc}`, borderRadius: 8, padding: (settings.receipt80Padding || 6) + "px", fontSize: (settings.receipt80FontSize || 9) + "px", fontFamily: "monospace", color: "#1a1a18", maxWidth: 220, margin: "0 auto", boxShadow: "0 2px 8px rgba(0,0,0,.08)" }}>
+                <div style={{ textAlign: "center", fontWeight: 700 }}>{settings.clubName || "نادي النخيل"}</div>
+                <div style={{ borderTop: "1px dashed #999", margin: "4px 0" }} />
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>بيبسي × 2</span><span>10.00</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>قهوة × 1</span><span>5.00</span></div>
+                <div style={{ borderTop: "1px dashed #999", margin: "4px 0" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}><span>الإجمالي</span><span>15.00 {settings.currency || "د.ل"}</span></div>
+                {settings.receipt80ShowBarcode !== false && <div style={{ textAlign: "center", margin: "6px 0", letterSpacing: 2, fontSize: "1.3em" }}>▌│▌││▌│▌▌│▌│▌</div>}
+                {settings.receipt80ShowFooter !== false && <div style={{ textAlign: "center", marginTop: 4, fontSize: "0.85em", color: "#666" }}>{settings.invoiceFooter || "شكراً لكم"}</div>}
+              </div>
+            </div>
           </Card>
 
           <Card className="nk-card-hover">
@@ -305,6 +377,19 @@ export default function Settings({ ctx }) {
                 <span>إظهار التذييل والتواقيع</span>
               </label>
             </Field>
+
+            {/* معاينة حية */}
+            <div style={{ marginTop: 12, borderTop: `0.5px solid ${C.bc}`, paddingTop: 12 }}>
+              <div style={{ fontSize: 10.5, color: C.mt, marginBottom: 6, fontWeight: 600 }}>معاينة حية</div>
+              <div style={{ background: "#fff", border: `1px solid ${C.bc}`, borderRadius: 8, padding: (settings.normalPadding || 12) + "px", fontSize: (settings.normalFontSize || 11.5) + "px", fontFamily: "inherit", color: "#1a1a18", boxShadow: "0 2px 8px rgba(0,0,0,.08)" }}>
+                <div style={{ textAlign: "center", fontWeight: 700, marginBottom: 6 }}>{settings.clubName || "نادي النخيل"}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #ddd", paddingBottom: 4, marginBottom: 4, fontWeight: 700 }}><span>الصنف</span><span>الإجمالي</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>بيبسي × 2</span><span>10.00</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}><span>قهوة × 1</span><span>5.00</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px solid #ddd", paddingTop: 4, marginTop: 4 }}><span>الإجمالي</span><span>15.00 {settings.currency || "د.ل"}</span></div>
+                {settings.normalShowFooter !== false && <div style={{ textAlign: "center", marginTop: 8, fontSize: "0.85em", color: "#666" }}>{settings.invoiceFooter || "شكراً لكم"}</div>}
+              </div>
+            </div>
           </Card>
 
           <div style={{ gridColumn: "1 / -1", background: C.gold + "12", border: `0.5px solid ${C.gold}55`, borderRadius: 10, padding: ".8rem 1rem", fontSize: 12, color: C.gdd, display: "flex", gap: 8 }}>
@@ -326,6 +411,10 @@ export default function Settings({ ctx }) {
             <Field label="الوصف / الشعار النصي"><Inp value={settings.clubSub} onChange={e => set("clubSub", e.target.value)} /></Field>
             <Field label="العنوان"><Inp value={settings.address} onChange={e => set("address", e.target.value)} /></Field>
             <Field label="رقم الهاتف"><Inp value={settings.phone} onChange={e => set("phone", e.target.value)} /></Field>
+            {/* لم يكن لهذا الحقل أي مكان في الواجهة رغم استخدامه في كل صفحة
+                بالنظام تقريباً (الفواتير، التقارير، الرواتب...) — يبقى "د.ل"
+                افتراضياً للأبد بلا وسيلة لتغييره */}
+            <Field label="رمز العملة (يظهر في كل الفواتير والتقارير)"><Inp value={settings.currency || ""} onChange={e => set("currency", e.target.value)} placeholder="د.ل" /></Field>
           </Card>
           <Card className="nk-card-hover">
             <CardHead title="الكلمات الترحيبية والفاتورة" sub="خصّص نبرة رسائل النظام" />
@@ -423,7 +512,18 @@ export default function Settings({ ctx }) {
             )}
             <div style={{ marginTop: 12, borderTop: `0.5px solid ${C.bc}`, paddingTop: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: C.red, marginBottom: 6 }}>منطقة الخطر</div>
-              <Btn danger onClick={async () => { if (await confirm("سيتم مسح كل البيانات نهائياً (بما فيها المستخدمون) والبدء بنظام فارغ. ستظهر شاشة إنشاء حساب المدير من جديد. هل أنت متأكد؟", { danger: true })) DB.reset(); }}>🗑 مسح كل البيانات والبدء من جديد</Btn>
+              {/* كان تأكيداً واحداً فقط لأخطر إجراء في النظام بأكمله (يمسح
+                  المستخدمين أيضاً) — الآن يتطلب تنزيل نسخة احتياطية أولاً وكتابة
+                  كلمة "حذف" صراحةً قبل تفعيل الزر */}
+              <Btn onClick={() => { const f = DB.downloadBackupFile(); showToast(f ? `نُزّلت نسخة احتياطية: ${f}` : "تعذّر إنشاء نسخة احتياطية"); }} style={{ marginBottom: 10 }}>📥 نزّل نسخة احتياطية أولاً</Btn>
+              <div style={{ fontSize: 11.5, color: C.mt, marginBottom: 8 }}>اكتب كلمة <b>حذف</b> في الحقل أدناه لتفعيل زر المسح:</div>
+              <Inp value={wipeText} onChange={e => setWipeText(e.target.value)} placeholder="اكتب: حذف" style={{ marginBottom: 8, maxWidth: 220 }} />
+              <div>
+                <Btn danger disabled={wipeText.trim() !== "حذف"} onClick={async () => {
+                  if (wipeText.trim() !== "حذف") return;
+                  if (await confirm("سيتم مسح كل البيانات نهائياً (بما فيها المستخدمون) والبدء بنظام فارغ. ستظهر شاشة إنشاء حساب المدير من جديد. هل أنت متأكد؟", { danger: true })) DB.reset();
+                }} style={{ opacity: wipeText.trim() === "حذف" ? 1 : .5, cursor: wipeText.trim() === "حذف" ? "pointer" : "not-allowed" }}>🗑 مسح كل البيانات والبدء من جديد</Btn>
+              </div>
             </div>
           </Card>
           <Card className="nk-card-hover">
@@ -436,6 +536,17 @@ export default function Settings({ ctx }) {
               <pre style={{ background: "#14431f", color: "#f0d080", borderRadius: 9, padding: ".7rem .9rem", fontSize: 11, direction: "ltr", textAlign: "left", overflowX: "auto", marginTop: 6 }}>{`VITE_SUPABASE_URL=https://xxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}</pre>
               أعد تشغيل خادم التطوير (npm run dev) — ستتحول الحالة إلى ☁️ سحابية تلقائياً، وكل جهاز يفتح النظام يرى نفس البيانات. لا تُرفع <code style={{ background: C.crm, padding: "1px 6px", borderRadius: 5 }}>.env.local</code> إلى أي مستودع عام — يحتوي مفاتيح مشروعك.
+            </div>
+          </Card>
+          <Card className="nk-card-hover">
+            {/* نسخ الشعار والألوان وإعدادات الطباعة لفرع أو جهاز آخر كان يتطلب
+                إعادة ضبط كل حقل يدوياً — النسخ الاحتياطي في BackupManager أدناه
+                يشمل كل بيانات النظام (فواتير، زبائن...) لا الإعدادات فقط */}
+            <CardHead title="تصدير/استيراد الإعدادات فقط" sub="لنسخ التهيئة (الشعار، الألوان، الطباعة...) لجهاز أو فرع آخر" />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Btn onClick={exportSettings}>⬇ تصدير الإعدادات</Btn>
+              <input ref={importRef} type="file" accept="application/json" onChange={importSettings} style={{ display: "none" }} />
+              <Btn onClick={() => importRef.current?.click()}>⬆ استيراد الإعدادات</Btn>
             </div>
           </Card>
           <div style={{ gridColumn: "1 / -1" }}><BackupManager ctx={ctx} /></div>
