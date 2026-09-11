@@ -157,6 +157,19 @@ const APP_CSS = (gold, touch, anim) => `
         }
         /* عند الطباعة الاحتياطية: يُطبع المستند فقط */
         @media print {
+          /* nk-print-hide يُزال بالكامل من الشجرة (لا يكفي إخفاؤه بصرياً فقط)
+             — شريط التنقل الجانبي ولوحة الصفحات تبقى مركّبة في الخلفية خلف
+             نافذة المعاينة (كلاهما شقيقان في نفس الشجرة، لا مكوّن منفصل)،
+             وحجمها الطبيعي أكبر من صفحة واحدة (min-height:100vh على الأقل).
+             مع تضييق الصفحة إلى 80مم عند طباعة الإيصالات، يُعاد ترتيب (reflow)
+             كل هذا المحتوى المخفي داخل عمود ضيق جداً فيتمدد لعشرات الصفحات،
+             وبما أن نافذة المعاينة نفسها position:fixed فإنها تُعاد طباعتها
+             على كل صفحة من تلك الصفحات الإضافية — وهذا هو السبب الفعلي لظهور
+             نسخ إضافية من الفاتورة عند الطباعة رغم أن أمر الطباعة يُستدعى مرة
+             واحدة فقط. display:none (لا visibility:hidden) يمنع أي مساهمة في
+             ارتفاع المستند فلا تتولّد صفحات إضافية أصلاً */
+          body.nk-printing .nk-print-hide, body.nk-printing-labels .nk-print-hide { display: none !important; }
+
           body.nk-printing * { visibility: hidden !important; }
           body.nk-printing .nk-pdf-sheet, body.nk-printing .nk-pdf-sheet * { visibility: visible !important; }
           body.nk-printing .nk-pdf-sheet { position: absolute !important; top: 0; right: 0; left: 0; margin: 0 !important; max-width: none !important; box-shadow: none !important; border-radius: 0 !important; }
@@ -529,7 +542,7 @@ function NakheelApp() {
 
       {/* إنذار فشل الحفظ — يعلو كل شيء ولا يُغلق: ما دام ظاهراً فالعمل الجديد لا يُحفظ */}
       {writeError && (
-        <div role="alert" style={{
+        <div role="alert" className="nk-print-hide" style={{
           position: "fixed", top: 0, insetInline: 0, zIndex: 900, background: "#c0392b", color: "#fff",
           padding: ".6rem 1rem", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center",
           justifyContent: "center", gap: 10, flexWrap: "wrap", boxShadow: "0 4px 16px rgba(0,0,0,.3)",
@@ -548,7 +561,7 @@ function NakheelApp() {
 
       {/* TOP BAR (tablet) */}
       {isTab && (
-        <div style={{ position: "sticky", top: 0, zIndex: 90, display: "flex", alignItems: "center", gap: 10, background: C.grn, padding: ".6rem .9rem", boxShadow: "0 2px 10px rgba(0,0,0,.18)" }}>
+        <div className="nk-print-hide" style={{ position: "sticky", top: 0, zIndex: 90, display: "flex", alignItems: "center", gap: 10, background: C.grn, padding: ".6rem .9rem", boxShadow: "0 2px 10px rgba(0,0,0,.18)" }}>
           <button onClick={() => setNavOpen(true)} aria-label="القائمة" style={{ background: C.gold + "22", border: `1px solid ${C.gold}66`, color: C.gld, borderRadius: 9, fontSize: 19, padding: ".2rem .65rem", cursor: "pointer", fontFamily: "inherit" }}>☰</button>
           {settings.logo ? <img src={settings.logo} alt="" style={{ width: 30, height: 30, borderRadius: 8, objectFit: "cover" }} /> : <Crest size={30} />}
           <div style={{ flex: 1, fontSize: 14, fontWeight: 900, color: C.gld }}>{settings.clubName}</div>
@@ -560,11 +573,11 @@ function NakheelApp() {
 
       {/* BACKDROP (tablet drawer) */}
       {isTab && navOpen && (
-        <div onClick={() => setNavOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 99 }} />
+        <div className="nk-print-hide" onClick={() => setNavOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 99 }} />
       )}
 
       {/* SIDEBAR */}
-      <div style={{ position: "fixed", top: 0, right: 0, width: isTab ? 260 : 225, height: "100vh", background: `linear-gradient(180deg,${C.grn} 0%, ${C.dark ? "#0a0906" : "#0e3318"} 100%)`, overflowY: "auto", zIndex: 100, display: "flex", flexDirection: "column",
+      <div className="nk-print-hide" style={{ position: "fixed", top: 0, right: 0, width: isTab ? 260 : 225, height: "100vh", background: `linear-gradient(180deg,${C.grn} 0%, ${C.dark ? "#0a0906" : "#0e3318"} 100%)`, overflowY: "auto", zIndex: 100, display: "flex", flexDirection: "column",
         transform: isTab ? (navOpen ? "translateX(0)" : "translateX(100%)") : "none",
         transition: "transform .28s ease" + (settings.animations ? ", background .4s ease" : ""),
         boxShadow: isTab && navOpen ? "-8px 0 30px rgba(0,0,0,.35)" : "none" }}>
@@ -663,7 +676,7 @@ function NakheelApp() {
       </div>
 
       {/* MAIN */}
-      <div style={{ marginRight: isTab ? 0 : 225, minHeight: "100vh", padding: isTab ? ".9rem .8rem" : "1.1rem 1.4rem" }}>
+      <div className="nk-print-hide" style={{ marginRight: isTab ? 0 : 225, minHeight: "100vh", padding: isTab ? ".9rem .8rem" : "1.1rem 1.4rem" }}>
         <div className="nk-page" key={page}>
         <ErrorBoundary resetKey={page} onReset={() => setPage("dashboard")}>
         <Suspense fallback={<div style={{ textAlign: "center", padding: "3rem 0", color: C.mt, fontSize: 13 }}>⏳ جارٍ التحميل...</div>}>
