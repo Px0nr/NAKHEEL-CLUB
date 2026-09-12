@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { C, fmt } from "../constants/theme.js";
 import { TYPE_NAME, TYPE_ICON, ASSET_STATUS } from "../constants/seeds.js";
 import { normalizeAsset, activeQtyOf } from "../utils/assetsHelpers.js";
@@ -36,7 +36,17 @@ export default function Reports({ ctx }) {
   const [presetName, setPresetName] = useState("");
   const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split("T")[0]; });
   const [to, setTo] = useState(todayISO());
+  // وضع فترة المقارنة: تلقائي (سابقة مباشرة مساوية الطول) / نفس الفترة قبل عام / مخصصة يدوياً / بلا مقارنة
+  const [cmpMode, setCmpMode] = useState("auto");
+  const [customPrevFrom, setCustomPrevFrom] = useState("");
+  const [customPrevTo, setCustomPrevTo] = useState("");
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   const printRef = useRef(null);
+  // إعادة ضبط الفرز والصفحة عند تغيير نوع التقرير — معاني الأعمدة تختلف كلياً بين تقرير وآخر
+  useEffect(() => { setSortCol(null); setSortDir("asc"); setPage(1); }, [type]);
   // تقرير الزبائن لقطة لحالة النظام الآن (دَين حالي، آخر زيارة إجمالية) لا حركة ضمن فترة —
   // نفس منطق "products" و"assets" أدناه، فلا يُقيَّد بنطاق تاريخ
   const rangeless = type === "assets" || type === "products" || type === "customers" || type === "stockValuation";
@@ -389,24 +399,63 @@ export default function Reports({ ctx }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const cfg = useMemo(() => buildReport(from, to), [...depsBase, from, to]);
 
-  // فترة مقارنة بنفس عدد الأيام مباشرة قبل الفترة الحالية — لعرض دلتا الفترة السابقة بجانب رقم التقرير الرئيسي
+  // فترة المقارنة — تلقائياً مساوية الطول مباشرة قبل الفترة الحالية، أو نفس
+  // الفترة قبل عام، أو مخصصة يدوياً، أو مُعطَّلة بالكامل حسب اختيار المستخدم
   const { prevFrom, prevTo } = useMemo(() => {
-    const fromD = new Date(from + "T00:00:00Z");
-    const prevToD = new Date(fromD.getTime() - 86400000);
-    const days = Math.round((new Date(to + "T00:00:00Z") - fromD) / 86400000) + 1;
-    const prevFromD = new Date(prevToD.getTime() - (days - 1) * 86400000);
+    if (cmpMode === "none") return { prevFrom: null, prevTo: null };
     const iso = (d) => d.toISOString().slice(0, 10);
+    if (cmpMode === "custom") return { prevFrom: customPrevFrom || null, prevTo: customPrevTo || null };
+    const fromD = new Date(from + "T00:00:00Z");
+    const toD = new Date(to + "T00:00:00Z");
+    if (cmpMode === "yearAgo") {
+      const prevFromD = new Date(fromD); prevFromD.setUTCFullYear(prevFromD.getUTCFullYear() - 1);
+      const prevToD = new Date(toD); prevToD.setUTCFullYear(prevToD.getUTCFullYear() - 1);
+      return { prevFrom: iso(prevFromD), prevTo: iso(prevToD) };
+    }
+    const days = Math.round((toD - fromD) / 86400000) + 1;
+    const prevToD = new Date(fromD.getTime() - 86400000);
+    const prevFromD = new Date(prevToD.getTime() - (days - 1) * 86400000);
     return { prevFrom: iso(prevFromD), prevTo: iso(prevToD) };
-  }, [from, to]);
+  }, [from, to, cmpMode, customPrevFrom, customPrevTo]);
+  const cmpActive = !rangeless && !!prevFrom && !!prevTo;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const prevCfg = useMemo(() => (rangeless ? null : buildReport(prevFrom, prevTo)), [...depsBase, prevFrom, prevTo, rangeless]);
-  const headlineDelta = (!rangeless && cfg.headline != null && prevCfg?.headline != null) ? pctDelta(cfg.headline, prevCfg.headline) : null;
+  const prevCfg = useMemo(() => (cmpActive ? buildReport(prevFrom, prevTo) : null), [...depsBase, prevFrom, prevTo, cmpActive]);
+  const headlineDelta = (cmpActive && cfg.headline != null && prevCfg?.headline != null) ? pctDelta(cfg.headline, prevCfg.headline) : null;
+  const cmpLabel = cmpMode === "yearAgo" ? "نفس الفترة قبل عام" : cmpMode === "custom" ? "فترة مقارنة مخصصة" : "فترة مقارنة مساوية الطول";
+
+  // فرز صفوف الجدول الرئيسي بالنقر على عمود — خلايا التقارير كلها قيم أولية
+  // (نصوص/أرقام) لا JSX، فيكفي تحويلها لرقم إن أمكن ثم مقارنة نصية كبديل
+  const parseCell = (v) => {
+    if (typeof v === "number") return v;
+    if (v == null) return null;
+    const n = parseFloat(String(v).replace(/[^\d.-]/g, ""));
+    return isNaN(n) ? null : n;
+  };
+  const sortedTbody = useMemo(() => {
+    if (sortCol == null) return cfg.tbody;
+    return [...cfg.tbody].sort((a, b) => {
+      const na = parseCell(a[sortCol]), nb = parseCell(b[sortCol]);
+      const cmp = (na != null && nb != null) ? na - nb : String(a[sortCol] ?? "").localeCompare(String(b[sortCol] ?? ""), "ar");
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [cfg.tbody, sortCol, sortDir]);
+  const toggleSort = (idx) => {
+    if (sortCol === idx) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(idx); setSortDir("asc"); }
+    setPage(1);
+  };
+  const totalPages = Math.max(1, Math.ceil(sortedTbody.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+  const pageTbody = sortedTbody.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
 
   // تصدير التقرير الحالي كملف Excel (xlsx) منسّق — عناوين غامقة، اتجاه RTL، عرض أعمدة تلقائي
-  // أوراق التصدير: الجدول الرئيسي، ويُضاف الجدول التفصيلي إن وُجد (تأجير/قسم/زبائن...)
+  // أوراق التصدير: الجدول الرئيسي (بترتيبه الحالي، كاملاً بلا تقسيم صفحات)، الجدول
+  // التفصيلي إن وُجد (تأجير/قسم/زبائن...)، وجدول فترة المقارنة إن كانت مفعّلة —
+  // كان يظهر فرق % على الشاشة فقط بلا أي وسيلة لتحليل أرقام الفترة السابقة خارج النظام
   const exportSheets = () => {
-    const sheets = [{ name: cfg.title, thead: cfg.thead, tbody: cfg.tbody }];
+    const sheets = [{ name: cfg.title, thead: cfg.thead, tbody: sortedTbody }];
     if (cfg.tbody2 && cfg.tbody2.length) sheets.push({ name: cfg.title2 || "تفصيل إضافي", thead: cfg.thead2, tbody: cfg.tbody2 });
+    if (prevCfg) sheets.push({ name: `مقارنة ${arDate(prevFrom)}—${arDate(prevTo)}`, thead: prevCfg.thead, tbody: prevCfg.tbody });
     return sheets;
   };
   const exportName = () => `${cfg.title}-${todayISO()}`;
@@ -416,7 +465,7 @@ export default function Reports({ ctx }) {
     const name = presetName.trim();
     if (!name) { showToast("اكتب اسماً للإعداد أولاً"); return; }
     const id = Date.now();
-    setReportPresets(prev => [...prev, { id, name, type, cat, source, resType, from, to }]);
+    setReportPresets(prev => [...prev, { id, name, type, cat, source, resType, tierFilter, from, to }]);
     setPresetName("");
     setSelectedPreset(String(id));
     showToast(`تم حفظ الإعداد «${name}»`);
@@ -426,7 +475,7 @@ export default function Reports({ ctx }) {
     setSelectedPreset(id);
     const p = reportPresets.find(p => String(p.id) === String(id));
     if (!p) return;
-    setType(p.type); setCat(p.cat || ""); setSource(p.source || ""); setResType(p.resType || "");
+    setType(p.type); setCat(p.cat || ""); setSource(p.source || ""); setResType(p.resType || ""); setTierFilter(p.tierFilter || "");
     if (p.from) setFrom(p.from);
     if (p.to) setTo(p.to);
   };
@@ -439,18 +488,22 @@ export default function Reports({ ctx }) {
 
   const doPrint = () => {
     const w = window.open("", "_blank", "width=900,height=650");
+    // window.open يُعيد null لو حظر المتصفح النافذة — بلا هذا الفحص يتعطّل
+    // النظام بخطأ غير مفهوم بدل رسالة واضحة
+    if (!w) { showToast("⚠ يبدو أن المتصفح حظر النافذة المنبثقة — اسمح بالنوافذ المنبثقة لهذا الموقع وحاول مجدداً"); return; }
     w.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير نادي النخيل</title>
     <style>*{box-sizing:border-box;margin:0;padding:0;font-family:'Tajawal',sans-serif}body{padding:2cm;direction:rtl;font-size:13px;color:#1a1a18}
     .hd{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #c9a84c;padding-bottom:.75rem;margin-bottom:1rem}.nm{font-size:15px;font-weight:700;color:#1a5c2e}.sub{font-size:10px;color:#7a7870}.info{text-align:left;font-size:10px;color:#7a7870}
     h3{font-size:15px;font-weight:700;color:#1a5c2e;text-align:center}h4{font-size:13px;font-weight:700;color:#1a5c2e;margin:1.2rem 0 .4rem}p.range{text-align:center;font-size:11px;color:#7a7870;margin:2px 0 1rem}
     .sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:1rem}.sc{background:#f5f2ea;border-radius:7px;padding:.6rem;text-align:center}.sv{font-size:16px;font-weight:700;color:#1a5c2e}.sl{font-size:10px;color:#7a7870;margin-top:2px}
     table{width:100%;border-collapse:collapse;margin-top:.5rem}th{background:#1a5c2e;color:#f0d080;padding:.45rem .6rem;text-align:right;font-size:11px}td{padding:.45rem .6rem;border-bottom:0.5px solid #e8e4d8;font-size:12px}tr:nth-child(even) td{background:#faf8f2}
+    tr{page-break-inside:avoid}
     .ft{text-align:center;font-size:10px;color:#7a7870;margin-top:1.5rem;padding-top:.75rem;border-top:0.5px solid #c9a84c}</style></head><body>
     <div class="hd"><div><div class="nm">🌴 نادي النخيل</div><div class="sub">النادي الرياضي الترفيهي</div></div><div class="info">مصراتة، ليبيا<br>تاريخ الطباعة: ${new Date().toLocaleDateString("ar-LY")}</div></div>
     <h3>${cfg.title}${cat && (type === "products") ? " — قسم " + (cats[cat] || cat) : ""}${tierFilter && type === "customers" ? " — فئة " + tierFilter : ""}</h3>${rangeless ? "" : `<p class="range">الفترة: ${arDate(from)} — ${arDate(to)}</p>`}
     <div class="sum">${cfg.summary.map(s => `<div class="sc"><div class="sv">${s[1]}</div><div class="sl">${s[0]}</div></div>`).join("")}</div>
     ${cfg.note ? `<p style="background:#FFF7EB;border:0.5px dashed #c9a84c;border-radius:8px;padding:8px 12px;font-size:11px;color:#8a6a20;margin:10px 0">📌 ${cfg.note}</p>` : ""}
-    <table><thead><tr>${cfg.thead.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${cfg.tbody.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>
+    <table><thead><tr>${cfg.thead.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${sortedTbody.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>
     ${cfg.tbody2 ? `<h4>${cfg.title2 || ""}</h4><table><thead><tr>${cfg.thead2.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${cfg.tbody2.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>` : ""}
     <div class="ft">نادي النخيل — ${cfg.title} — جميع الأرقام بالدينار الليبي</div>
     <script>window.onload=function(){window.print();}</script></body></html>`);
@@ -495,6 +548,18 @@ export default function Reports({ ctx }) {
           </Field>
           <Field label="من تاريخ"><Inp type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field>
           <Field label="إلى تاريخ"><Inp type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
+          <Field label="المقارنة">
+            <Sel value={cmpMode} onChange={e => setCmpMode(e.target.value)} style={{ minWidth: 150 }}>
+              <option value="auto">تلقائي (الفترة السابقة)</option>
+              <option value="yearAgo">نفس الفترة قبل عام</option>
+              <option value="custom">فترة مخصصة</option>
+              <option value="none">بلا مقارنة</option>
+            </Sel>
+          </Field>
+          {cmpMode === "custom" && <>
+            <Field label="من (مقارنة)"><Inp type="date" value={customPrevFrom} onChange={e => setCustomPrevFrom(e.target.value)} /></Field>
+            <Field label="إلى (مقارنة)"><Inp type="date" value={customPrevTo} onChange={e => setCustomPrevTo(e.target.value)} /></Field>
+          </>}
         </>}
         <Btn onClick={() => downloadCsv(exportSheets(), exportName())} style={{ marginBottom: ".75rem" }}>⬇ تصدير CSV</Btn>
         <Btn onClick={() => downloadExcel(exportSheets(), exportName())} style={{ marginBottom: ".75rem" }}>📊 تصدير Excel</Btn>
@@ -519,7 +584,7 @@ export default function Reports({ ctx }) {
         <div style={{ textAlign: "center", marginBottom: "1rem" }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.grn2 }}>{cfg.title}{cat && type === "products" ? " — قسم " + (cats[cat] || cat) : ""}{tierFilter && type === "customers" ? " — فئة " + tierFilter : ""}</h3>
           {!rangeless && <p style={{ fontSize: 11, color: C.mt, marginTop: 2 }}>الفترة: {arDate(from)} — {arDate(to)}{headlineDelta != null && (
-            <span style={{ marginRight: 8, fontWeight: 700, color: headlineDelta >= 0 ? "#1a8c3e" : C.red }}>{headlineDelta >= 0 ? "▲" : "▼"} {Math.abs(headlineDelta)}% عن فترة مقارنة مساوية الطول ({arDate(prevFrom)} — {arDate(prevTo)})</span>
+            <span style={{ marginRight: 8, fontWeight: 700, color: headlineDelta >= 0 ? "#1a8c3e" : C.red }}>{headlineDelta >= 0 ? "▲" : "▼"} {Math.abs(headlineDelta)}% عن {cmpLabel} ({arDate(prevFrom)} — {arDate(prevTo)})</span>
           )}</p>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: "1rem" }}>
@@ -537,7 +602,17 @@ export default function Reports({ ctx }) {
             <RankBarChart data={cfg.chart.data} color={cfg.chart.color} cur={ctx.settings?.currency || "د.ل"} />
           </div>
         )}
-        <Table cols={cfg.thead.map(h => ({ h, w: (100 / cfg.thead.length) + "%" }))} rows={cfg.tbody} />
+        <Table cols={cfg.thead.map((h, i) => ({
+          h: <span onClick={() => toggleSort(i)} style={{ cursor: "pointer", userSelect: "none" }}>{h}{sortCol === i ? (sortDir === "asc" ? " ▲" : " ▼") : ""}</span>,
+          w: (100 / cfg.thead.length) + "%",
+        }))} rows={pageTbody} />
+        {totalPages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 12, paddingTop: 10, borderTop: `0.5px solid ${C.bc}` }}>
+            <Btn sm onClick={() => setPage(p => Math.max(1, p - 1))} style={{ opacity: pageSafe === 1 ? .4 : 1 }}>‹ السابق</Btn>
+            <span style={{ fontSize: 12, color: C.mt }}>صفحة {pageSafe} من {totalPages} ({fmt(sortedTbody.length)} صف)</span>
+            <Btn sm onClick={() => setPage(p => Math.min(totalPages, p + 1))} style={{ opacity: pageSafe === totalPages ? .4 : 1 }}>التالي ›</Btn>
+          </div>
+        )}
         {cfg.tbody2 && cfg.tbody2.length > 0 && (
           <>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.grn2, margin: "1.2rem 0 .5rem" }}>{cfg.title2}</div>
