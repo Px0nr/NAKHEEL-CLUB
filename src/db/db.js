@@ -46,7 +46,15 @@ export const DB = {
     (this.subscribers[k] || []).forEach(cb => { try { cb(v); } catch { /* ignore */ } });
   },
 
-  async init() {
+  // React.StrictMode يشغّل الإقلاع مرتين بالتوازي — نشارك نفس الوعد كي لا يُنشأ اشتراك Realtime مرتين
+  // (الثاني كان يرمي "cannot add postgres_changes callbacks after subscribe" فيسقط النظام للتخزين المحلي)
+  init() {
+    if (this.ready) return Promise.resolve();
+    if (!this._initPromise) this._initPromise = this._init().finally(() => { this._initPromise = null; });
+    return this._initPromise;
+  },
+
+  async _init() {
     if (this.ready) return;
     // 1) المحاولة السحابية (Supabase)
     if (SUPABASE_URL && SUPABASE_ANON_KEY) {
