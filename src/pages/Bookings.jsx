@@ -368,7 +368,7 @@ export default function Bookings({ ctx }) {
         } />
         {cbShown.length === 0 ? <div style={{ color: C.mt, fontSize: 12, padding: "1rem 0", textAlign: "center" }}>لا توجد حجوزات مكتملة ضمن هذا النطاق</div> :
           <Table cols={[{ h: "النشاط", w: "20%" }, { h: "الزبون", w: "16%" }, { h: "المدة", w: "12%" }, { h: "السعر/ساعة", w: "12%" }, { h: "الإجمالي", w: "12%" }, { h: "الفاتورة", w: "14%" }, { h: "التاريخ", w: "14%" }]}
-            rows={cbShown.slice(0, 100).map(b => [`${TYPE_ICON[b.type]} ${TYPE_NAME[b.type]} — ${b.tableName}`, b.customer, b.dur, b.rate + " " + cur, fmt(Math.round(b.total * 10) / 10) + " " + cur, <Badge tone="b">#{b.inv}</Badge>, b.date ? arDate(b.date) : "—"])} />}
+            rows={cbShown.slice(0, 100).map(b => [`${TYPE_ICON[b.type]} ${TYPE_NAME[b.type]} — ${b.tableName}`, b.customer, b.dur, b.rate + " " + cur, fmt(Math.round(b.total * 10) / 10) + " " + cur, <Badge tone="b">{/^[\w-]+$/.test(String(b.inv)) ? `#${b.inv}` : b.inv}</Badge>, b.date ? arDate(b.date) : "—"])} />}
         {cbShown.length > 100 && <div style={{ fontSize: 11, color: C.mt, textAlign: "center", marginTop: 8 }}>يعرض أحدث 100 من {fmt(cbShown.length)} — ضيّق النطاق الزمني أو صدِّر الكل</div>}
       </Card>
 
